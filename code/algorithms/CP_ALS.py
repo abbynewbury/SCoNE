@@ -47,6 +47,9 @@ def cp_als(T, T_norm, rank, a, b, d, max_iter=50, tol=1e-4):
         rel_error.append(e_t/T_norm)
 
         if (epoch>0) and (e[epoch] - e[epoch-1] < tol*T_norm):
-            return a, b, d,rel_error
-            
-    return a, b, d,rel_error
+            success = True
+            message = None
+            return a, b, d,rel_error,success,message
+    success = False
+    message = f'Reached # iterations: {max_iter}'
+    return a, b, d,rel_error,success,message

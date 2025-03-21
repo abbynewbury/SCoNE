@@ -59,5 +59,5 @@ def cp_opt(T, T_norm, rank, a, b, d, reg_param, method, options):
     if result.success is not True:
         print(f'OPTIMIZATION NOT SUCCESSFUL: {result}', flush=True)
     A,B,D = vec2mats(result.x, rank, T.shape[0], T.shape[1], T.shape[2])
-    return A,B,D,loss_history, result.success
+    return A,B,D,loss_history, result.success, result.message
         

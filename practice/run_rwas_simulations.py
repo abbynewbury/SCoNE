@@ -63,7 +63,7 @@ sim_id = 0
 command = ['sbatch', f'{unsupervised_pheno_dir}/practice/rwas_simulations.py','--N',str(N),'--S',str(S),'--Q',str(Q), '--sim_id', str(sim_id), 
             '--p',' '.join(map(str,p_base)), '--s', ' '.join(map(str,s_base)), '--pge', str(pge_base), '--snp_hom_effects', snp_hom_effects_base,
             '--snps_af_range', ' '.join(map(str,snps_af_range_base)), '--mus_variance', str(mus_variance_base), 
-            '--simulation_results_path',f'{unsupervised_pheno_dir}/practice/simulation_results/vanilla_comparison', '--newton_cg', 'True']
+            '--simulation_results_path',f'{unsupervised_pheno_dir}/practice/simulation_results/vanilla_comparison', '--newton_cg', 'True','--bfgs', 'True']
 t = Thread(target=submit_job, args=(command,))
 t.start()
 

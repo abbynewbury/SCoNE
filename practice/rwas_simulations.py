@@ -9,6 +9,7 @@
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 
+
 import sys
 sys.path.append('/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/code')
 import utilities
@@ -45,6 +46,7 @@ parser.add_argument("--mus_variance", type=float, required=True, help="Input arg
 parser.add_argument("--sim_id", type=int, required=True, help="ID representing simulation params")
 parser.add_argument("--simulation_results_path", type=str, required=True, help="path to write results")
 parser.add_argument("--newton_cg", type=bool, default=False, help="whether to use Newton-CG as OPT solver, very slow")
+parser.add_argument("--bfgs", type=bool, default=False, help="whether to use BFGS as OPT solver, often fails to succeed due to hitting max # iterations")
 parser.add_argument("--reg_params", type=str, default='0', help="regularization parameter for OPT")
 args = parser.parse_args()
 
@@ -67,11 +69,12 @@ mus_variance = args.mus_variance
 sim_id = args.sim_id
 simulation_results_path = args.simulation_results_path
 newton_cg = args.newton_cg
+bfgs = args.bfgs
 reg_params = [float(i) for i in args.reg_params.split(' ')]
 
 # read in params
 
-
+print('starting',flush=True)
 # 1. SIMULATE DATA
 C,X,snp_metadata, trait_metadata, true_subtypes,alpha = RGWAS_sim.generate_sim_data(N,S,Q,rank,p,s,pge,snp_hom_effects,snps_af_range,mus_variance)
 X = (X - X.mean())/(X.std())
@@ -83,9 +86,12 @@ T_norm = np.linalg.norm(T)
 # 2. SETUP DATA RECORDING AND INITIALIZATION
 metadata_df = [] # data for analysis and graphs
 metadata_df_columns = ['sim_id', 'init', 'model_id', 'N','S','Q','p','s','pge','snp_hom_effects','snps_af_range','mus_variance', 'relative error', 'silhouette score', 'orthogonality norm',
-                   'max memory (MB)', 'CPU time', 'user time', 'success', 'reg_param']
-rel_error_history_dict = {} # structured like sim_id: model_id: rel_error
-loss_history_dict = {} # specific to LS and L_ortho loss for OPT (and possibly NLS) sim_id: model_id: {LS:, L_ortho:}
+                   'max memory (MB)', 'CPU time', 'user time', 'success','message', 'reg_param']
+rel_error_history_df = []
+rel_error_history_df_columns = ['sim_id','init','model_id','reg_param','iteration','relative error']
+loss_history_df = [] # specific to LS and L_ortho loss for OPT (and possibly NLS) sim_id: model_id: {LS:, L_ortho:}
+loss_history_df_columns = ['sim_id','init','model_id','reg_param','iteration','LS','L_ortho']
+
 
 # function for silhouette score metric
 # calculate metrics
@@ -94,13 +100,10 @@ def calc_sil_score(a, true_subtypes):
     A_df['disease'] = true_subtypes['true subtype'].values
     sil_score = silhouette_score(A_df.drop('disease',axis=1).to_numpy(), A_df['disease'].values)
     return sil_score
+print('runnning trials',flush=True)
 
-rel_error_history_dict[sim_id] ={}
-loss_history_dict[sim_id] ={}
 # run five trials with different random initializations
 for random_init in range(5):
-    loss_history_dict[sim_id][f'OPT (BFGS){random_init}'] = {}
-    loss_history_dict[sim_id][f'OPT (L-BFGS-B){random_init}'] = {}
 
     # ensure that they start at same random init
     a_init = np.random.random((T.shape[0], rank))
@@ -109,68 +112,86 @@ for random_init in range(5):
 
     # 2. RUN MODELS ON DATA
     # ALS
-    a, b, d, rel_error, max_mem, cpu_time, user_time = profile_function(CP_ALS.cp_als,T, T_norm, rank, a_init, b_init, d_init, max_iter=50, tol=1e-4)
+    a, b, d, rel_error, success,message,max_mem, cpu_time, user_time = profile_function(CP_ALS.cp_als,T, T_norm, rank, a_init, b_init, d_init, max_iter=50, tol=1e-4)
     sil_score = calc_sil_score(a,true_subtypes)
     ortho_norm= np.linalg.norm(np.multiply(b.T@b, d.T@d) - np.identity(rank))
     # record data
-    metadata_df.append([sim_id,random_init,f'ALS',N,S,Q,p,s,pge,snp_hom_effects,snps_af_range,mus_variance,rel_error[-1], sil_score, ortho_norm, max_mem, cpu_time, user_time, True, None])
-    rel_error_history_dict[sim_id][f'ALS{random_init}'] = rel_error
+    metadata_df.append([sim_id,random_init,f'ALS',N,S,Q,p,s,pge,snp_hom_effects,snps_af_range,mus_variance,rel_error[-1], sil_score, ortho_norm, max_mem, cpu_time, user_time, success, message, None])
+    rel_error_history_df.extend([[sim_id,random_init,f'ALS',None,i,rel_error[i]] for i in range(len(rel_error))])
+    # write a,b,d as well
+    np.save(f'{simulation_results_path}/ALS_a_{sim_id}_{random_init}.npy', a) 
+    np.save(f'{simulation_results_path}/ALS_b_{sim_id}_{random_init}.npy', b)
+    np.save(f'{simulation_results_path}/ALS_d_{sim_id}_{random_init}.npy', d)
     print('Done with ALS', flush=True)
 
     # OPT
     if newton_cg:
-        loss_history_dict[sim_id][f'OPT (Newton-CG){random_init}'] = {}
         # loss history has relative error, LS (least squares loss) and L_ortho (orthogonal loss) at each iteration
         for reg_param in reg_params:
-            a, b, d, loss_history, success, max_mem, cpu_time, user_time = profile_function(CP_OPT.cp_opt, T, T_norm, rank,  a_init, b_init, d_init, reg_param=reg_param, method='Newton-CG', options={'maxiter':1000, 'xtol':1e-4})
+            a, b, d, loss_history, success, message, max_mem, cpu_time, user_time = profile_function(CP_OPT.cp_opt, T, T_norm, rank,  a_init, b_init, d_init, reg_param=reg_param, method='Newton-CG', options={'maxiter':1000, 'xtol':1e-4})
             sil_score = calc_sil_score(a,true_subtypes)
             ortho_norm= np.linalg.norm(np.multiply(b.T@b, d.T@d) - np.identity(rank))
             # record data
-            metadata_df.append([sim_id,random_init,f'OPT (Newton-CG)',N,S,Q,p,s,pge,snp_hom_effects,snps_af_range,mus_variance,loss_history[-1][0], sil_score, ortho_norm, max_mem, cpu_time, user_time, success, reg_param])
-            rel_error_history_dict[sim_id][f'OPT (Newton-CG){random_init}'] = [i[0] for i in loss_history]
-            loss_history_dict[sim_id][f'OPT (Newton-CG){random_init}']['LS'] = [i[1] for i in loss_history]
-            loss_history_dict[sim_id][f'OPT (Newton-CG){random_init}']['L_ortho'] = [i[2] for i in loss_history]
+            metadata_df.append([sim_id,random_init,f'OPT (Newton-CG)',N,S,Q,p,s,pge,snp_hom_effects,snps_af_range,mus_variance,loss_history[-1][0], sil_score, ortho_norm, max_mem, cpu_time, user_time, success, message,reg_param])
+            rel_error_history_df.extend([[sim_id,random_init,f'OPT (Newton-CG)',reg_param,i,loss_history[i][0]] for i in range(len(loss_history))])
+            loss_history_df.extend([[sim_id,random_init,f'OPT (Newton-CG)',reg_param,i,loss_history[i][1],loss_history[i][2]] for i in range(len(loss_history))])
+            # write a,b,d as well
+            np.save(f'{simulation_results_path}/OPT (Newton-CG)_a_{sim_id}_{random_init}_{reg_param}.npy', a) 
+            np.save(f'{simulation_results_path}/OPT (Newton-CG)_b_{sim_id}_{random_init}_{reg_param}.npy', b)
+            np.save(f'{simulation_results_path}/OPT (Newton-CG)_d_{sim_id}_{random_init}_{reg_param}.npy', d)
             print(f'Done with OPT (Newton-CG), reg_param:{reg_param}', flush=True)
 
-    for reg_param in reg_params:
-        a, b, d, loss_history, success, max_mem, cpu_time, user_time = profile_function(CP_OPT.cp_opt, T, T_norm, rank,  a_init, b_init, d_init, reg_param=reg_param, method='BFGS', options={'maxiter':1000, 'gtol':1e-5})
-        sil_score = calc_sil_score(a,true_subtypes)
-        ortho_norm= np.linalg.norm(np.multiply(b.T@b, d.T@d) - np.identity(rank))
-        # record data
-        metadata_df.append([sim_id,random_init,f'OPT (BFGS)',N,S,Q,p,s,pge,snp_hom_effects,snps_af_range,mus_variance,loss_history[-1][0], sil_score, ortho_norm, max_mem, cpu_time, user_time, success, reg_param])
-        rel_error_history_dict[sim_id][f'OPT (BFGS){random_init}'] = [i[0] for i in loss_history]
-        loss_history_dict[sim_id][f'OPT (BFGS){random_init}']['LS'] = [i[1] for i in loss_history]
-        loss_history_dict[sim_id][f'OPT (BFGS){random_init}']['L_ortho'] = [i[2] for i in loss_history]
-        print(f'Done with OPT (BFGS), reg_param:{reg_param}', flush=True)
+    if bfgs:
+        for reg_param in reg_params:
+            a, b, d, loss_history, success, message, max_mem, cpu_time, user_time = profile_function(CP_OPT.cp_opt, T, T_norm, rank,  a_init, b_init, d_init, reg_param=reg_param, method='BFGS', options={'maxiter':1000, 'gtol':1e-5})
+            sil_score = calc_sil_score(a,true_subtypes)
+            ortho_norm= np.linalg.norm(np.multiply(b.T@b, d.T@d) - np.identity(rank))
+            # record data
+            metadata_df.append([sim_id,random_init,f'OPT (BFGS)',N,S,Q,p,s,pge,snp_hom_effects,snps_af_range,mus_variance,loss_history[-1][0], sil_score, ortho_norm, max_mem, cpu_time, user_time, success, message,reg_param])
+            rel_error_history_df.extend([[sim_id,random_init,f'OPT (BFGS)',reg_param,i,loss_history[i][0]] for i in range(len(loss_history))])
+            loss_history_df.extend([[sim_id,random_init,f'OPT (BFGS)',reg_param,i,loss_history[i][1],loss_history[i][2]] for i in range(len(loss_history))])
+            # write a,b,d as well
+            np.save(f'{simulation_results_path}/OPT (BFGS)_a_{sim_id}_{random_init}_{reg_param}.npy', a) 
+            np.save(f'{simulation_results_path}/OPT (BFGS)_b_{sim_id}_{random_init}_{reg_param}.npy', b)
+            np.save(f'{simulation_results_path}/OPT (BFGS)_d_{sim_id}_{random_init}_{reg_param}.npy', d)
+            print(f'Done with OPT (BFGS), reg_param:{reg_param}', flush=True)
 
     for reg_param in reg_params:
-        a, b, d, loss_history, success, max_mem, cpu_time, user_time = profile_function(CP_OPT.cp_opt, T, T_norm, rank, a_init, b_init, d_init, reg_param=reg_param, method='L-BFGS-B', options={'maxcor':5, 'maxiter':1000, 'gtol':1e-5, 'maxls':10, 'ftol':1e-5})
+        a, b, d, loss_history, success, message, max_mem, cpu_time, user_time = profile_function(CP_OPT.cp_opt, T, T_norm, rank, a_init, b_init, d_init, reg_param=reg_param, method='L-BFGS-B', options={'maxcor':5, 'maxiter':1000, 'gtol':1e-5, 'maxls':10, 'ftol':1e-5})
         sil_score = calc_sil_score(a,true_subtypes)
         ortho_norm= np.linalg.norm(np.multiply(b.T@b, d.T@d) - np.identity(rank))
         # record data
-        metadata_df.append([sim_id,random_init,f'OPT (L-BFGS-B)',N,S,Q,p,s,pge,snp_hom_effects,snps_af_range,mus_variance,loss_history[-1][0], sil_score, ortho_norm, max_mem, cpu_time, user_time, success, reg_param])
-        rel_error_history_dict[sim_id][f'OPT (L-BFGS-B){random_init}'] = [i[0] for i in loss_history]
-        loss_history_dict[sim_id][f'OPT (L-BFGS-B){random_init}']['LS'] = [i[1] for i in loss_history]
-        loss_history_dict[sim_id][f'OPT (L-BFGS-B){random_init}']['L_ortho'] = [i[2] for i in loss_history]
+        metadata_df.append([sim_id,random_init,f'OPT (L-BFGS-B)',N,S,Q,p,s,pge,snp_hom_effects,snps_af_range,mus_variance,loss_history[-1][0], sil_score, ortho_norm, max_mem, cpu_time, user_time, success, message,reg_param])
+        rel_error_history_df.extend([[sim_id,random_init,f'OPT (L-BFGS-B)',reg_param,i,loss_history[i][0]] for i in range(len(loss_history))])
+        loss_history_df.extend([[sim_id,random_init,f'OPT (L-BFGS-B)',reg_param,i,loss_history[i][1],loss_history[i][2]] for i in range(len(loss_history))])
+        # write a,b,d as well
+        np.save(f'{simulation_results_path}/OPT (L-BFGS-B)_a_{sim_id}_{random_init}_{reg_param}.npy', a) 
+        np.save(f'{simulation_results_path}/OPT (L-BFGS-B)_b_{sim_id}_{random_init}_{reg_param}.npy', b)
+        np.save(f'{simulation_results_path}/OPT (L-BFGS-B)_d_{sim_id}_{random_init}_{reg_param}.npy', d)
         print(f'Done with OPT (L-BFGS-B), reg_param:{reg_param}', flush=True)
 
 
     # CPO-ALS1
-    a, b, d, rel_error, max_mem, cpu_time, user_time = profile_function(CPO_ALS1.cpo_als1, T, T_norm, rank,  a_init, b_init, d_init, max_iter=50, tol=1e-4)
+    a, b, d, rel_error, success, message, max_mem, cpu_time, user_time = profile_function(CPO_ALS1.cpo_als1, T, T_norm, rank,  a_init, b_init, d_init, max_iter=50, tol=1e-4)
     sil_score = calc_sil_score(a,true_subtypes)
     ortho_norm= np.linalg.norm(np.multiply(b.T@b, d.T@d) - np.identity(rank))
     # record data
-    metadata_df.append([sim_id,random_init,f'CPO-ALS1',N,S,Q,p,s,pge,snp_hom_effects,snps_af_range,mus_variance,rel_error[-1], sil_score, ortho_norm, max_mem, cpu_time, user_time, True, None])
-    rel_error_history_dict[sim_id][f'CPO-ALS1{random_init}'] = rel_error
-    print('Done with OPT (CPO-ALS1)', flush=True)
+    metadata_df.append([sim_id,random_init,f'CPO-ALS1',N,S,Q,p,s,pge,snp_hom_effects,snps_af_range,mus_variance,rel_error[-1], sil_score, ortho_norm, max_mem, cpu_time, user_time, success, message, None])
+    rel_error_history_df.extend([[sim_id,random_init,f'CPO-ALS1',None,i,rel_error[i]] for i in range(len(rel_error))])
+    np.save(f'{simulation_results_path}/CPO-ALS1_a_{sim_id}_{random_init}.npy', a) 
+    np.save(f'{simulation_results_path}/CPO-ALS1_b_{sim_id}_{random_init}.npy', b)
+    np.save(f'{simulation_results_path}/CPO-ALS1_d_{sim_id}_{random_init}.npy', d)
+    print('Done with CPO-ALS1', flush=True)
 
 print('writing data', flush=True)
 metadata_df = pd.DataFrame(metadata_df, columns = metadata_df_columns)
 metadata_df.to_csv(f'{simulation_results_path}/{sim_id}_metadata.csv')
-with open(f"{simulation_results_path}/{sim_id}_rel_error_history_dict.json", "w") as json_file:
-    json.dump(rel_error_history_dict, json_file)
-with open(f"{simulation_results_path}/{sim_id}_loss_history_dict.json", "w") as json_file:
-    json.dump(loss_history_dict, json_file)
+
+rel_error_history_df = pd.DataFrame(rel_error_history_df, columns=rel_error_history_df_columns)
+rel_error_history_df.to_csv(f'{simulation_results_path}/{sim_id}_rel_error_history.csv')
+
+loss_history_df = pd.DataFrame(loss_history_df, columns=loss_history_df_columns)
+loss_history_df.to_csv(f'{simulation_results_path}/{sim_id}_loss_history.csv')
 
 sys.stdout.flush()
 sys.stderr.flush()
