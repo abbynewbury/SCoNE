@@ -3,9 +3,18 @@ from utilities import f_unfold
 import tensorly as tl
 from tensortools.operations import khatri_rao
 import math
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
+from torch.utils.tensorboard import SummaryWriter
+# # Fix tensorboard problem
+# import tensorflow as tf
+# import tensorboard as tb
 
-def cp_als(T, T_norm, rank, a, b, d, max_iter=50, tol=1e-4):
-    # decompose with orthogonality constraint on b and d - similar to Algorithm 11.1 in Kolda textbook
+def cp_als(T, T_norm, rank, a, b, d, writer, max_iter=50, tol=1e-4):
+    # similar to Algorithm 11.1 in Kolda textbook
+    # writer is tensorboard writer
 
     # a = np.random.random((tensor.shape[0], rank))
     # b = np.random.random((tensor.shape[1], rank))
@@ -46,10 +55,15 @@ def cp_als(T, T_norm, rank, a, b, d, max_iter=50, tol=1e-4):
         e.append(e_t)
         rel_error.append(e_t/T_norm)
 
+        if writer is not None:
+            writer.add_scalar('Relative Error', e_t/T_norm, epoch)
+
         if (epoch>0) and (e[epoch] - e[epoch-1] < tol*T_norm):
             success = True
             message = None
-            return a, b, d,rel_error,success,message
+            #return a, b, d,rel_error,success,message
+            return a, b, d, success, message
     success = False
     message = f'Reached # iterations: {max_iter}'
-    return a, b, d,rel_error,success,message
+    #return a, b, d,rel_error,success,message
+    return a, b, d, success, message

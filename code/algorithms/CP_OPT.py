@@ -4,6 +4,14 @@ import tensorly as tl
 from tensortools.operations import khatri_rao
 from functools import partial
 from scipy.optimize import minimize
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
+from torch.utils.tensorboard import SummaryWriter
+# # Fix tensorboard problem
+# import tensorflow as tf
+# import tensorboard as tb
 
 
 def OPT_FG(v, T, T_norm_squared, rank, reg_param):
@@ -47,7 +55,7 @@ def rel_error_calc(v,T,T_norm,rank, reg_param):
 
 
 # Callback function to store loss at each step
-def cp_opt(T, T_norm, rank, a, b, d, reg_param, method, options):
+def cp_opt(T, T_norm, rank, a, b, d, reg_param, method, writer, options):
     # make sure options are specific to solver method specified (if unsure look at scipy.optimize.minimize documentation)
     loss_history = []
     def callback(v, T,T_norm,rank, reg_param):
@@ -59,5 +67,11 @@ def cp_opt(T, T_norm, rank, a, b, d, reg_param, method, options):
     if result.success is not True:
         print(f'OPTIMIZATION NOT SUCCESSFUL: {result}', flush=True)
     A,B,D = vec2mats(result.x, rank, T.shape[0], T.shape[1], T.shape[2])
+    # add in loss
+    if writer is not None:
+        for iteration in range(len(loss_history)):
+            writer.add_scalar('Relative Error', loss_history[iteration][0], iteration)
+            writer.add_scalar('LS', loss_history[iteration][1], iteration)
+            writer.add_scalar('L_ortho', loss_history[iteration][2], iteration)
     return A,B,D,loss_history, result.success, result.message
         

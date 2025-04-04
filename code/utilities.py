@@ -14,6 +14,11 @@ def f_unfold(tensor, mode=0):
     return np.reshape(np.moveaxis(tensor, mode, 0), 
                       (tensor.shape[mode], -1), order='F')
 
+def f_refold(tensor, original_shape, mode=0):
+    # mode is mode that it was unfolded into
+    return np.moveaxis(np.reshape(tensor, np.roll(original_shape, -mode), order='F'), 0, mode)
+
+
 # As vec2mats per Kolda textbook
 def vec2mats(v, rank, T_0, T_1, T_2): 
     """ Converts a vector into matrices A, B, D based on given shapes.
@@ -23,8 +28,8 @@ def vec2mats(v, rank, T_0, T_1, T_2):
     """
     A = v[:T_0*rank].reshape(T_0, rank, order='F')
     B = v[T_0*rank:T_0*rank+T_1*rank].reshape(T_1, rank, order='F')
-    C = v[T_0*rank+T_1*rank:].reshape(T_2, rank, order='F')
-    return A, B, C
+    D = v[T_0*rank+T_1*rank:].reshape(T_2, rank, order='F')
+    return A, B, D
 
 #As mats2vec per Kolda textbook
 def mats2vec(G1, G2, G3):
