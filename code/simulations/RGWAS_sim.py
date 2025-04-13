@@ -89,18 +89,9 @@ def generate_sim_data(N,S,Q,K,p,s,pge,snp_hom_effects,snps_af_range,mus_variance
 
     # simulate quantitative phenotypes using these covariates
     Y0 = np.empty((N, Q))
-    mus_ = []
-    pop_main_effects_ = []
-    het = []
-    hom = []
-    noise = []
     for i in range(N):
-        Y0[i, :] = mus[z[i], :] + pop_main_effects[i, :] + snps[i,mask_hom] @ alpha + snps[i,mask_het] @ betas[z[i]] + (0.25)*np.random.randn(Q) # subtype main effects + pop. main effects + homogeneous effects + heterogeneous effects
-        mus_.extend(mus[z[i], :].flatten().tolist())
-        pop_main_effects_.extend(pop_main_effects[i, :].flatten().tolist())
-        het.extend((snps[i,mask_het] @ betas[z[i]]).flatten().tolist())
-        hom.extend((snps[i,mask_hom] @ alpha).flatten().tolist())
-        noise.extend(((0.25)*np.random.randn(Q)).flatten().tolist())  
+        Y0[i, :] = np.random.poisson(np.exp(mus[z[i], :] + pop_main_effects[i, :] + snps[i,mask_hom] @ alpha + snps[i,mask_het] @ betas[z[i]] + (0.25)*np.random.randn(Q)))  # subtype main effects + pop. main effects + homogeneous effects + heterogeneous effects
+        #+ (0.25)*np.random.randn(Q)
     # if  below a certain threshold, re-adjust to label as control - maybe don't need to
     true_subtypes = pd.DataFrame(z,columns=['true subtype'])
     true_subpops = pd.DataFrame(sub_pops,columns=['true subpop'])

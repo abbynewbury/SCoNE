@@ -11,13 +11,14 @@
 
 
 import sys
-sys.path.append('/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/code')
+code_path = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/code' # TODO - don't hardcode
+sys.path.append(code_path)
 import utilities
 from utilities import tensor_func
 from utilities import profile_function
 import sys
 sys.path.append('/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/code/algorithms')
-import CP_ALS, CP_NLS, CP_OPT, CPO_ALS1, JointMF
+import CP_ALS, CP_NLS, CP_OPT, CPO_ALS1, JointMF, CP_OPT_adj
 sys.path.append('/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/code/simulations')
 import RGWAS_sim
 import numpy as np
@@ -40,6 +41,8 @@ from sklearn.metrics import normalized_mutual_info_score, adjusted_rand_score, f
 from collections import Counter
 from sklearn.decomposition import PCA
 import statsmodels.api as sm
+import subprocess
+
 
 
 np.random.seed(1234)
@@ -62,6 +65,7 @@ parser.add_argument("--newton_cg", type=bool, default=False, help="whether to us
 parser.add_argument("--bfgs", type=bool, default=False, help="whether to use BFGS as OPT solver, often fails to succeed due to hitting max # iterations")
 parser.add_argument("--reg_params", type=str, default='0', help="regularization parameter for OPT")
 parser.add_argument("--num_pops", type=int, default=1, help="number of subpopulations")
+parser.add_argument("--r_path", type=str, default='', help="path to r") #/gpfs/commons/home/anewbury/miniconda/bin/Rscript
 args = parser.parse_args()
 
 rank=2 # same as number of subtypes
@@ -80,6 +84,7 @@ newton_cg = args.newton_cg
 bfgs = args.bfgs
 num_pops = args.num_pops
 reg_params = [float(i) for i in args.reg_params.split(' ')]
+r_path = args.r_path
 
 # Redirect standard output and standard error
 stdout_file = open(f"{simulation_results_path}/logs/outputs/{sim_id}_output.txt", "w")
@@ -94,10 +99,11 @@ sys.stderr = stderr_file
 C,X,snp_metadata, trait_metadata, true_subtypes, true_subpops = RGWAS_sim.generate_sim_data(N,S,Q,rank,p,s,pge,snp_hom_effects,snps_af_range,mus_variance,num_pops)
 # X should consist of 0s or 1s (dominant model right now)
 X = np.where((X == 1) | (X == 2), 1, 0) # dominant model
-# C should consist of counts (capping count at 100 right now)
-C = (C - C.min()) / (C.max() - C.min()) * 100
-C = np.floor(C).astype(int) + 1
-C = np.clip(C, 1, 100)
+
+# keep condition counts up to 10
+C = (C - C.min()) / (C.max() - C.min()) * 10
+C = np.floor(C).astype(int)
+C = np.clip(C, 0, 10)
 
 # set Z to represent top 5 PCs of genotype matrix - proxy for subpopulation
 X_scaled = (X - X.mean())/(X.std())
@@ -112,22 +118,26 @@ metadata = metadata[['true subtype','true subpop']].values.tolist()
 
 # 1.5. GET GROUND TRUTH
 def fit_logistic_regression(X, Z, y):
-    all_coeffs = np.hstack([X, Z])
-    all_coeffs = sm.add_constant(all_coeffs)
-    model = sm.Logit(y, all_coeffs)
-    result = model.fit(maxiter=100)
-    gamma_true, lambda_x_true = result.params[1:X.shape[1]+1], result.params[X.shape[1]+1:]
-    return gamma_true, lambda_x_true
+    gamma_true = []
+    gamma_true_pvals = []
+    for i in range(X.shape[1]):
+        all_coeffs = np.hstack([X[:,i].reshape(-1, 1), Z])
+        all_coeffs = sm.add_constant(all_coeffs)
+        model = sm.Logit(y, all_coeffs)
+        result = model.fit(maxiter=500)
+        assert result.mle_retvals['converged'], "Model failed to converge"
+        gamma_true.append(result.params[1]) # 1 bc 0 is coeff
+        gamma_true_pvals.append(result.pvalues[1])
+    return np.array(gamma_true), np.array(gamma_true_pvals)
 
 # stack for diff labels 0/1 (weird shortcut like this since we only have two subtypes)
-gamma_true1, lambda_x_true1 = fit_logistic_regression(X,Z,true_subtypes['true subtype'].to_numpy())
-gamma_true0, lambda_x_true0 = fit_logistic_regression(X,Z,1-true_subtypes['true subtype'].to_numpy())
-gamma_true = np.vstack([gamma_true1,gamma_true0]).T
-lambda_x_true = np.vstack([lambda_x_true1,lambda_x_true0]).T
-alpha_true1, lambda_c_true1 = fit_logistic_regression(C,Z,true_subtypes['true subtype'].to_numpy())
-alpha_true0, lambda_c_true0 = fit_logistic_regression(C,Z,1-true_subtypes['true subtype'].to_numpy())
-alpha_true = np.vstack([alpha_true1,alpha_true0]).T
-lambda_c_true = np.vstack([lambda_c_true1,lambda_c_true0]).T
+gamma, gamma_pvals = fit_logistic_regression(X,Z,true_subtypes['true subtype'].to_numpy())
+gamma = np.vstack([gamma,-gamma]).T
+gamma_pvals = np.vstack([gamma_pvals,gamma_pvals]).T
+
+alpha, alpha_pvals = fit_logistic_regression(C,Z,true_subtypes['true subtype'].to_numpy())
+alpha = np.vstack([alpha,-alpha]).T
+alpha_pvals = np.vstack([alpha_pvals,alpha_pvals]).T
 
 
 # 2. FUNCTIONS TO CALCULATE METRICS
@@ -144,41 +154,60 @@ def calc_purity(labels, preds):
     purity = correct/len(labels)
     return purity
 
-def calc_metrics(a, b, d, true_subtypes):
+def calc_cluster_metrics(a, true_vals):
+    # calculate cluster metrics for sample loadings (a)
+    if len(set(true_vals))>1:
+        sil_score = silhouette_score(a, true_vals)
+        kmeans = KMeans(n_clusters=len(np.unique(true_vals)), n_init='auto').fit(a)
+        preds = kmeans.labels_
+        nmi = normalized_mutual_info_score(true_vals, preds)
+        ari = adjusted_rand_score(true_vals, preds)
+        # calculate purity
+        purity = max(calc_purity(true_vals, preds),calc_purity(true_vals, 1-preds))
+    else:
+        sil_score, nmi, ari, purity = [float('nan')]*4
+    return sil_score, nmi, ari, purity
+
+
+def calc_metrics(a, b, d,true_vals, gamma, alpha):
+    # gamma - oracle SNP effect sizes
+    # alpha - oracle condition effect sizes
     # calculate clustering metrics    
-    A_df = pd.DataFrame(a, columns=[f'factor{i+1}' for i in range(rank)])
-    A_df['disease'] = true_subtypes['true subtype'].values
-    sil_score = silhouette_score(A_df.drop('disease',axis=1).to_numpy(), A_df['disease'].values)
-    kmeans = KMeans(n_clusters=len(np.unique(true_subtypes)), n_init='auto').fit(a)
-    preds = kmeans.labels_
-    nmi = normalized_mutual_info_score(A_df['disease'].values, preds)
-    ari = adjusted_rand_score(A_df['disease'].values, preds)
-    f1 = f1_score(A_df['disease'].values, preds, average='macro')
-    # calculate purity
-    purity = calc_purity(A_df['disease'].values, preds)
+    sil_score, nmi, ari, purity = calc_cluster_metrics(a, true_vals)
 
     # calc orthogonality metrics
     ortho_norm_b = np.linalg.norm(b.T@b - np.identity(rank))/np.linalg.norm(b.T@b)
     ortho_norm_d = np.linalg.norm(d.T@d - np.identity(rank))/np.linalg.norm(d.T@d)
 
-    # calc abs(correlation) between B and gamma
+    # calc abs(correlation) between B and gamma - since only two subtypes and taking abs correlation - doesn't matter which column of B is paired up with which classification of subtypes (subtypes or 1-subtypes)
+    if set(np.unique(b)).issubset({0, 1}):
+        b_scaled = b
+    else:
+        b_scaled = (b - b.mean(axis=0)) / b.std(axis=0)
+    gamma_scaled = (gamma - gamma.mean(axis=0)) / gamma.std(axis=0)
+    pearson_r_b_gamma = np.dot(b_scaled.T, gamma_scaled) / b_scaled.shape[0]
 
-    # calc abs(correlation) between D and alpha
-
-    return sil_score, nmi, ari, f1, purity
+    # calc abs(correlation) between D and alpha - since only two subtypes and taking abs correlation - doesn't matter which column of B is paired up with which classification of subtypes (subtypes or 1-subtypes)
+    if set(np.unique(b)).issubset({0, 1}):
+        d_scaled = d
+    else:
+        d_scaled = (d - d.mean(axis=0)) / d.std(axis=0)
+    alpha_scaled = (alpha - alpha.mean(axis=0)) / alpha.std(axis=0)
+    pearson_r_d_alpha = np.dot(d_scaled.T, alpha_scaled) / d_scaled.shape[0]
+    return sil_score, nmi, ari, purity,ortho_norm_b,ortho_norm_d, abs(pearson_r_b_gamma[:,0]).mean(), abs(pearson_r_d_alpha[:,0]).mean()
 
 #3. RUN MODELS ON DATA 
 # run five trials with different random initializations
-for random_init in range(1): # TODO - change back to 5
+for random_init in range(1): # TODO: switch back to 5
 
     # ensure that they start at same random init
-    a_init = np.random.random((T.shape[0], rank))
-    b_init = np.random.random((T.shape[1], rank))
-    d_init = np.random.random((T.shape[2], rank))
+    A_init = np.random.random((T.shape[0], rank))
+    B_init = np.random.random((T.shape[1], rank))
+    D_init = np.random.random((T.shape[2], rank))
 
-    # only used for joint NMF for now - can be incorporated into tensor
-    lambda_x_init = np.random.random((S, Z.shape[1]))
-    lambda_c_init = np.random.random((Q, Z.shape[1]))
+    # used to initialize adjustment matrices (in JointMF, ALS, OPT)
+    B_prime_init = np.random.random((S, Z.shape[1]))
+    D_prime_init = np.random.random((Q, Z.shape[1]))
 
     # 2. RUN MODELS ON DATA
     # ALS
@@ -186,133 +215,221 @@ for random_init in range(1): # TODO - change back to 5
     ## Open tensor board writer
     log_dir = os.path.join(f'{simulation_results_path}/logs/tensorboard', model_name)
     writer = SummaryWriter(log_dir)
-    # a, b, d, rel_error, success,message,max_mem, cpu_time, user_time = profile_function(CP_ALS.cp_als,T, T_norm, rank, a_init, b_init, d_init, max_iter=50, tol=1e-4) OLD
-    a, b, d, success,message, max_mem, cpu_time, user_time = profile_function(CP_ALS.cp_als,T, T_norm, rank, a_init, b_init, d_init, writer, max_iter=50, tol=1e-4) 
-    sil_score, nmi, ari, f1, purity, ortho_norm_b, ortho_norm_d = calc_metrics(a,b,d,true_subtypes)
-    hyperparams = {"MODEL":"ALS","SIM":sim_id,"INIT":random_init,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
+    A, B, D, success,message, max_mem, cpu_time, user_time = profile_function(CP_ALS.cp_als,T, T_norm, rank, A_init, B_init, D_init, writer, max_iter=50, tol=1e-4,mem_target='function') 
+    sil_score, nmi, ari, purity, ortho_norm_b, ortho_norm_d, pearson_r_b_gamma, pearson_r_d_alpha = calc_metrics(A,B,D,true_subtypes['true subtype'].values, gamma, alpha) # clustering per true subtypes
+    sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(A, true_subpops['true subpop'].values) # clustering per confounders
+    hyperparams = {"MODEL":"ALS","SIM":sim_id,"INIT":random_init,"Adjusted":0,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
                    "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
-    success = 1 if success is True else 0
-    metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'F1': f1, 'Purity': purity, 'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": success}
+    metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':pearson_r_b_gamma, 'R2 D,Alpha':pearson_r_d_alpha, 
+               'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
+                "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": 1 if success is True else 0}
     writer.add_hparams(hyperparams, metrics)
-    writer.add_embedding(torch.tensor(a), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
-    np.save(f'{simulation_results_path}/factor_matrices/a_{model_name}.npy', a) 
-    np.save(f'{simulation_results_path}/factor_matrices/b_{model_name}.npy', b)
-    np.save(f'{simulation_results_path}/factor_matrices/d_{model_name}.npy', d)
+    writer.add_embedding(torch.tensor(A), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
+    np.save(f'{simulation_results_path}/factor_matrices/A_{model_name}.npy', A) 
+    np.save(f'{simulation_results_path}/factor_matrices/B_{model_name}.npy', B)
+    np.save(f'{simulation_results_path}/factor_matrices/D_{model_name}.npy', D)
+
+    # CLIGEN (no cov. adjustment, C in {0,1})
+    T_cligen = np.fromfunction(lambda i, j, k: tensor_func(i, j, k, X, (C > 0).astype(int)), (N, S,Q), dtype=int)
+    T_cligen_norm = np.linalg.norm(T_cligen)
+    model_name = f'CLIGEN_{sim_id}_{random_init}'
+    ## Open tensor board writer
+    log_dir = os.path.join(f'{simulation_results_path}/logs/tensorboard', model_name)
+    writer = SummaryWriter(log_dir)
+    A, B, D, success,message, max_mem, cpu_time, user_time = profile_function(CP_ALS.cp_als,T_cligen, T_cligen_norm, rank, A_init, B_init, D_init, writer, max_iter=50, tol=1e-4,mem_target='function') 
+    sil_score, nmi, ari, purity, ortho_norm_b, ortho_norm_d, pearson_r_b_gamma, pearson_r_d_alpha = calc_metrics(A,B,D,true_subtypes['true subtype'].values, gamma, alpha) # clustering per true subtypes
+    sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(A, true_subpops['true subpop'].values) # clustering per confounders
+    hyperparams = {"MODEL":"CLIGEN","SIM":sim_id,"INIT":random_init,"Adjusted":0,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
+                   "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
+    metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':pearson_r_b_gamma, 'R2 D,Alpha':pearson_r_d_alpha, 
+               'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
+                "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": 1 if success is True else 0}
+    writer.add_hparams(hyperparams, metrics)
+    writer.add_embedding(torch.tensor(A), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
+    np.save(f'{simulation_results_path}/factor_matrices/A_{model_name}.npy', A) 
+    np.save(f'{simulation_results_path}/factor_matrices/B_{model_name}.npy', B)
+    np.save(f'{simulation_results_path}/factor_matrices/D_{model_name}.npy', D)
 
 
     # OPT
-    if newton_cg:
-        # loss history has relative error, LS (least squares loss) and L_ortho (orthogonal loss) at each iteration
-        for reg_param in reg_params:
-            model_name = f'OPT(Newton-CG)_{sim_id}_{random_init}_{reg_param}'
-            log_dir = os.path.join(f'{simulation_results_path}/logs/tensorboard', model_name)
-            writer = SummaryWriter(log_dir)
-            a, b, d, loss_history, success, message, max_mem, cpu_time, user_time = profile_function(CP_OPT.cp_opt, T, T_norm, rank,  a_init, b_init, d_init, reg_param=reg_param, method='Newton-CG', writer=writer, options={'maxiter':1000, 'xtol':1e-4})
-            sil_score, nmi, ari, f1, purity = calc_metrics(a,true_subtypes)
-            ortho_norm_b = np.linalg.norm(b.T@b - np.identity(rank))/np.linalg.norm(b.T@b)
-            ortho_norm_d = np.linalg.norm(d.T@d - np.identity(rank))/np.linalg.norm(d.T@d)
-            hyperparams = {"MODEL":"OPT(Newton-CG)","SIM":sim_id,"INIT":random_init,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
-                        "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
-            if success is False:
-                print(f'{model_name} has message: {message}',flush=True)
-            success = 1 if success is True else 0
-            metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'F1': f1, 'Purity': purity, 'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": success}
-            writer.add_hparams(hyperparams, metrics)
-            writer.add_embedding(torch.tensor(a), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
-            # write a,b,d as well
-            np.save(f'{simulation_results_path}/factor_matrices/a_{model_name}.npy', a) 
-            np.save(f'{simulation_results_path}/factor_matrices/b_{model_name}.npy', b)
-            np.save(f'{simulation_results_path}/factor_matrices/d_{model_name}.npy', d)
-
-
-    if bfgs:
-        for reg_param in reg_params:
-            model_name = f'OPT(BFGS)_{sim_id}_{random_init}_{reg_param}'
-            log_dir = os.path.join(f'{simulation_results_path}/logs/tensorboard', model_name)
-            writer = SummaryWriter(log_dir)
-            a, b, d, loss_history, success, message, max_mem, cpu_time, user_time = profile_function(CP_OPT.cp_opt, T, T_norm, rank,  a_init, b_init, d_init, reg_param=reg_param, method='BFGS', writer=writer, options={'maxiter':1000, 'gtol':1e-5})
-            sil_score, nmi, ari, f1, purity = calc_metrics(a,true_subtypes)
-            ortho_norm_b = np.linalg.norm(b.T@b - np.identity(rank))/np.linalg.norm(b.T@b)
-            ortho_norm_d = np.linalg.norm(d.T@d - np.identity(rank))/np.linalg.norm(d.T@d)
-            hyperparams = {"MODEL":"OPT(BFGS)","SIM":sim_id,"INIT":random_init,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
-                        "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
-            if success is False:
-                print(f'{model_name} has message: {message}',flush=True)
-            success = 1 if success is True else 0
-            metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'F1': f1, 'Purity': purity, 'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": success}
-            writer.add_hparams(hyperparams, metrics)
-            writer.add_embedding(torch.tensor(a), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
-            # write a,b,d as well
-            np.save(f'{simulation_results_path}/factor_matrices/a_{model_name}.npy', a) 
-            np.save(f'{simulation_results_path}/factor_matrices/b_{model_name}.npy', b)
-            np.save(f'{simulation_results_path}/factor_matrices/d_{model_name}.npy', d)
-
-
     for reg_param in reg_params:
-        model_name = f'OPT(L-BFGS-B)_{sim_id}_{random_init}_{reg_param}'
+        if newton_cg:
+            solver = 'Newton-CG' 
+            model_name = f'OPT({solver})_{sim_id}_{random_init}_{reg_param}'
+            method=solver
+            options={'maxiter':1000, 'xtol':1e-4}
+
+        if bfgs:
+            solver = 'BFGS'
+            model_name = f'OPT({solver})_{sim_id}_{random_init}_{reg_param}'
+            method=solver
+            options={'maxiter':1000, 'gtol':1e-5}
+
+        else: # default L-BFGS
+            solver = 'L-BFGS-B'
+            model_name = f'OPT({solver})_{sim_id}_{random_init}_{reg_param}'
+            method=solver
+            options={'maxcor':5, 'maxiter':1000, 'gtol':1e-5, 'maxls':10, 'ftol':1e-5}
+
+
         log_dir = os.path.join(f'{simulation_results_path}/logs/tensorboard', model_name)
         writer = SummaryWriter(log_dir)
-        a, b, d, loss_history, success, message, max_mem, cpu_time, user_time = profile_function(CP_OPT.cp_opt, T, T_norm, rank, a_init, b_init, d_init, reg_param=reg_param, method='L-BFGS-B', writer=writer, options={'maxcor':5, 'maxiter':1000, 'gtol':1e-5, 'maxls':10, 'ftol':1e-5})
-        sil_score, nmi, ari, f1, purity = calc_metrics(a,true_subtypes)
-        ortho_norm_b = np.linalg.norm(b.T@b - np.identity(rank))/np.linalg.norm(b.T@b)
-        ortho_norm_d = np.linalg.norm(d.T@d - np.identity(rank))/np.linalg.norm(d.T@d)
-        hyperparams = {"MODEL":"OPT(L-BFGS-B)","SIM":sim_id,"INIT":random_init,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
+        A, B, D, loss_history, success, message, max_mem, cpu_time, user_time = profile_function(CP_OPT.cp_opt, T, T_norm, rank, A_init, B_init, D_init, reg_param=reg_param, method=method, writer=writer, options=options,mem_target='function')
+        sil_score, nmi, ari, purity, ortho_norm_b, ortho_norm_d, pearson_r_b_gamma, pearson_r_d_alpha = calc_metrics(A,B,D,true_subtypes['true subtype'].values, gamma, alpha) # clustering per true subtypes
+        sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(A, true_subpops['true subpop'].values) # clustering per confounders
+        hyperparams = {"MODEL":f"OPT({solver})","SIM":sim_id,"INIT":random_init,"Adjusted":0,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
                     "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
-        if success is False:
-            print(f'{model_name} has message: {message}',flush=True)
-        success = 1 if success is True else 0
-        metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'F1': f1, 'Purity': purity, 'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": success}
+        metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':pearson_r_b_gamma, 'R2 D,Alpha':pearson_r_d_alpha, 
+                'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
+                    "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": 1 if success is True else 0}
         writer.add_hparams(hyperparams, metrics)
-        writer.add_embedding(torch.tensor(a), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
+        writer.add_embedding(torch.tensor(A), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
         # write a,b,d as well
-        np.save(f'{simulation_results_path}/factor_matrices/a_{model_name}.npy', a) 
-        np.save(f'{simulation_results_path}/factor_matrices/b_{model_name}.npy', b)
-        np.save(f'{simulation_results_path}/factor_matrices/d_{model_name}.npy', d)
+        np.save(f'{simulation_results_path}/factor_matrices/A_{model_name}.npy', A) 
+        np.save(f'{simulation_results_path}/factor_matrices/B_{model_name}.npy', B)
+        np.save(f'{simulation_results_path}/factor_matrices/D_{model_name}.npy', D)
+
+    # OPT adjusted (use same solver as above)
+    for reg_param in reg_params:
+        model_name = f'OPT_adj({solver})_{sim_id}_{random_init}_{reg_param}'
+        log_dir = os.path.join(f'{simulation_results_path}/logs/tensorboard', model_name)
+        writer = SummaryWriter(log_dir)
+        A, B, D, B_prime, D_prime, loss_history, success, message, max_mem, cpu_time, user_time = profile_function(CP_OPT_adj.cp_opt_adjusted, T, Z, T_norm, rank, A_init, B_init, D_init,B_prime_init, D_prime_init, reg_param=reg_param, method=method, writer=writer, options=options,mem_target='function')
+        sil_score, nmi, ari, purity, ortho_norm_b, ortho_norm_d, pearson_r_b_gamma, pearson_r_d_alpha = calc_metrics(A,B,D,true_subtypes['true subtype'].values, gamma, alpha) # clustering per true subtypes
+        sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(A, true_subpops['true subpop'].values) # clustering per confounders
+        hyperparams = {"MODEL":f"OPT_adj({solver})","SIM":sim_id,"INIT":random_init,"Adjusted":1,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
+                    "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
+        metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':pearson_r_b_gamma, 'R2 D,Alpha':pearson_r_d_alpha, 
+                'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
+                    "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": 1 if success is True else 0}
+        writer.add_hparams(hyperparams, metrics)
+        writer.add_embedding(torch.tensor(A), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
+        # write a,b,d as well
+        np.save(f'{simulation_results_path}/factor_matrices/A_{model_name}.npy', A) 
+        np.save(f'{simulation_results_path}/factor_matrices/B_{model_name}.npy', B)
+        np.save(f'{simulation_results_path}/factor_matrices/D_{model_name}.npy', D)
 
 
     # CPO-ALS1
     model_name = f'CPO-ALS1_{sim_id}_{random_init}'
     log_dir = os.path.join(f'{simulation_results_path}/logs/tensorboard', model_name)
     writer = SummaryWriter(log_dir)
-    a, b, d, rel_error, success, message, max_mem, cpu_time, user_time = profile_function(CPO_ALS1.cpo_als1, T, T_norm, rank,  a_init, b_init, d_init, writer, max_iter=50, tol=1e-4)
-    sil_score, nmi, ari, f1, purity = calc_metrics(a,true_subtypes)
-    ortho_norm_b = np.linalg.norm(b.T@b - np.identity(rank))/np.linalg.norm(b.T@b)
-    ortho_norm_d = np.linalg.norm(d.T@d - np.identity(rank))/np.linalg.norm(d.T@d)
-    hyperparams = {"MODEL":"CPO-ALS1","SIM":sim_id,"INIT":random_init,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
+    A, B, D, rel_error, success, message, max_mem, cpu_time, user_time = profile_function(CPO_ALS1.cpo_als1, T, T_norm, rank,  A_init, B_init, D_init, writer, max_iter=50, tol=1e-4,mem_target='function')
+    sil_score, nmi, ari, purity, ortho_norm_b, ortho_norm_d, pearson_r_b_gamma, pearson_r_d_alpha = calc_metrics(A,B,D,true_subtypes['true subtype'].values, gamma, alpha) # clustering per true subtypes
+    sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(A, true_subpops['true subpop'].values) # clustering per confounders
+    hyperparams = {"MODEL":"CPO-ALS1","SIM":sim_id,"INIT":random_init,"Adjusted":0,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
                 "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
-    success = 1 if success is True else 0
-    if success is False:
-        print(f'{model_name} has message: {message}',flush=True)
-    metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'F1': f1, 'Purity': purity, 'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": success}
+    metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':pearson_r_b_gamma, 'R2 D,Alpha':pearson_r_d_alpha, 
+               'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
+                "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": 1 if success is True else 0}
     writer.add_hparams(hyperparams, metrics)
-    print(a.shape,flush=True)
-    writer.add_embedding(torch.tensor(a), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
+    writer.add_embedding(torch.tensor(A), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
     # write a,b,d as well
-    np.save(f'{simulation_results_path}/factor_matrices/a_{model_name}.npy', a) 
-    np.save(f'{simulation_results_path}/factor_matrices/b_{model_name}.npy', b)
-    np.save(f'{simulation_results_path}/factor_matrices/d_{model_name}.npy', d)
+    np.save(f'{simulation_results_path}/factor_matrices/A_{model_name}.npy', A) 
+    np.save(f'{simulation_results_path}/factor_matrices/B_{model_name}.npy', B)
+    np.save(f'{simulation_results_path}/factor_matrices/D_{model_name}.npy', D)
 
     # JointMF
     model_name = f'JointMF_{sim_id}_{random_init}'
     log_dir = os.path.join(f'{simulation_results_path}/logs/tensorboard', model_name)
     writer = SummaryWriter(log_dir)
-    a,b,d,lambda_x, lambda_c, loss_history, success, message, max_mem, cpu_time, user_time = profile_function(JointMF.jmf, X, C, Z, rank, a_init, b_init, d_init, lambda_x_init, lambda_c_init, method='L-BFGS-B', writer=writer, options={'maxcor':5, 'maxiter':1000, 'gtol':1e-5, 'maxls':10, 'ftol':1e-5})
-    sil_score, nmi, ari, f1, purity = calc_metrics(a,true_subtypes)
-    ortho_norm_b = np.linalg.norm(b.T@b - np.identity(rank))/np.linalg.norm(b.T@b)
-    ortho_norm_d = np.linalg.norm(d.T@d - np.identity(rank))/np.linalg.norm(d.T@d)
-    hyperparams = {"MODEL":"JointMF","SIM":sim_id,"INIT":random_init,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
+    A,B,D,B_prime, D_prime, loss_history, success, message, max_mem, cpu_time, user_time = profile_function(JointMF.jmf, X, C, Z, rank, A_init, B_init, D_init, B_prime_init, D_prime_init, method='L-BFGS-B', writer=writer, options={'maxcor':5, 'maxiter':1000, 'gtol':1e-5, 'maxls':10, 'ftol':1e-5},mem_target='function')
+    sil_score, nmi, ari, purity, ortho_norm_b, ortho_norm_d, pearson_r_b_gamma, pearson_r_d_alpha = calc_metrics(A,B,D,true_subtypes['true subtype'].values, gamma, alpha) # clustering per true subtypes
+    sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(A, true_subpops['true subpop'].values) # clustering per confounders
+    hyperparams = {"MODEL":"JointMF","SIM":sim_id,"INIT":random_init,"Adjusted":1,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
                 "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
-    success = 1 if success is True else 0
-    if success is False:
-        print(f'{model_name} has message: {message}',flush=True)
-    metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'F1': f1, 'Purity': purity, 'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": success}
+    metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':pearson_r_b_gamma, 'R2 D,Alpha':pearson_r_d_alpha, 
+               'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
+                "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": 1 if success is True else 0}
     writer.add_hparams(hyperparams, metrics)
-    print(a.shape,flush=True)
-    writer.add_embedding(torch.tensor(a), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
+    writer.add_embedding(torch.tensor(A), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
     # write a,b,d as well
-    np.save(f'{simulation_results_path}/factor_matrices/a_{model_name}.npy', a) 
-    np.save(f'{simulation_results_path}/factor_matrices/b_{model_name}.npy', b)
-    np.save(f'{simulation_results_path}/factor_matrices/d_{model_name}.npy', d)
+    np.save(f'{simulation_results_path}/factor_matrices/A_{model_name}.npy', A) 
+    np.save(f'{simulation_results_path}/factor_matrices/B_{model_name}.npy', B)
+    np.save(f'{simulation_results_path}/factor_matrices/D_{model_name}.npy', D)
+
+    # HNMF (but different losses)
+    model_name = f'HNMF_{sim_id}_{random_init}'
+    log_dir = os.path.join(f'{simulation_results_path}/logs/tensorboard', model_name)
+    writer = SummaryWriter(log_dir)
+    A,B,D,B_prime, D_prime, loss_history, success, message, max_mem, cpu_time, user_time = profile_function(JointMF.jmf, X, C, np.zeros((Z.shape[0],Z.shape[1])), rank, A_init, B_init, D_init, B_prime_init, D_prime_init, method='L-BFGS-B', writer=writer, options={'maxcor':5, 'maxiter':1000, 'gtol':1e-5, 'maxls':10, 'ftol':1e-5},mem_target='function')
+    sil_score, nmi, ari, purity, ortho_norm_b, ortho_norm_d, pearson_r_b_gamma, pearson_r_d_alpha = calc_metrics(A,B,D,true_subtypes['true subtype'].values, gamma, alpha) # clustering per true subtypes
+    sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(A, true_subpops['true subpop'].values) # clustering per confounders
+    hyperparams = {"MODEL":"HNMF","SIM":sim_id,"INIT":random_init,"Adjusted":1,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
+                "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
+    metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':pearson_r_b_gamma, 'R2 D,Alpha':pearson_r_d_alpha, 
+               'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
+                "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": 1 if success is True else 0}
+    writer.add_hparams(hyperparams, metrics)
+    writer.add_embedding(torch.tensor(A), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
+    # write a,b,d as well
+    np.save(f'{simulation_results_path}/factor_matrices/A_{model_name}.npy', A) 
+    np.save(f'{simulation_results_path}/factor_matrices/B_{model_name}.npy', B)
+    np.save(f'{simulation_results_path}/factor_matrices/D_{model_name}.npy', D)
+
+    # Multi-view biclustering - will only run once since only two subtypes (for now)
+    model_name = f'MVBC_{sim_id}_{random_init}'
+    log_dir = os.path.join(f'{simulation_results_path}/logs/tensorboard', model_name)
+    writer = SummaryWriter(log_dir)
+    # running model
+    np.save(f'{simulation_results_path}/X_{sim_id}_{random_init}.npy',X.astype(np.float64))
+    np.save(f'{simulation_results_path}/C_{sim_id}_{random_init}.npy',C.astype(np.float64))
+    result, max_mem, cpu_time, user_time = profile_function(lambda: subprocess.run(
+    f'{r_path} {code_path}/algorithms/MVBC.R {simulation_results_path}/X_{sim_id}_{random_init}.npy {simulation_results_path}/C_{sim_id}_{random_init}.npy',
+    stdout=subprocess.PIPE,
+    text=True,
+    shell=True, executable='/bin/bash'),mem_target='subprocess')
+    # Parse the JSON output (result["Cluster"])
+    r_output = result.stdout.strip()
+    parsed = json.loads(r_output)
+    success=True
+    A = np.array(parsed['Cluster']).flatten().reshape(-1, 1)
+    B = np.array(parsed['FeatClusters'][0]).flatten().reshape(-1, 1)
+    D = np.array(parsed['FeatClusters'][1]).flatten().reshape(-1, 1)
+    os.remove(f'{simulation_results_path}/X_{sim_id}_{random_init}.npy')
+    os.remove(f'{simulation_results_path}/C_{sim_id}_{random_init}.npy')
+    # running model
+    sil_score, nmi, ari, purity, ortho_norm_b, ortho_norm_d, pearson_r_b_gamma, pearson_r_d_alpha = calc_metrics(A,B,D,true_subtypes['true subtype'].values, gamma, alpha) # clustering per true subtypes
+    sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(A, true_subpops['true subpop'].values) # clustering per confounders
+    hyperparams = {"MODEL":"MVBC","SIM":sim_id,"INIT":random_init,"Adjusted":0,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
+                "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
+    metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':pearson_r_b_gamma, 'R2 D,Alpha':pearson_r_d_alpha, 
+               'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
+                "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": 1 if success is True else 0}
+    writer.add_hparams(hyperparams, metrics)
+    writer.add_embedding(torch.tensor(A), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
+    # write a,b,d as well
+    np.save(f'{simulation_results_path}/factor_matrices/A_{model_name}.npy', A) 
+    np.save(f'{simulation_results_path}/factor_matrices/B_{model_name}.npy', B)
+    np.save(f'{simulation_results_path}/factor_matrices/D_{model_name}.npy', D)
+
+    # Oracle PRS
+    model_name = f'OraclePRSCondition_{sim_id}_{random_init}'
+    log_dir = os.path.join(f'{simulation_results_path}/logs/tensorboard', model_name)
+    writer = SummaryWriter(log_dir)
+    sil_score, nmi, ari, purity = calc_cluster_metrics(C@alpha, true_subtypes['true subtype'].values)
+    sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(C@alpha, true_subpops['true subpop'].values) # clustering per confounders
+    hyperparams = {"MODEL":"OraclePRSCondition","SIM":sim_id,"INIT":random_init,"Adjusted":1,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
+                "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
+    metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':1, 'R2 D,Alpha':1, 
+               'B rel. orth. norm':float('nan'),'D rel. orth. norm.': float('nan'), 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
+                "Max mem (MB)": float('nan'), "CPU time":float('nan'), "User time":float('nan'), "Success": 1}
+    writer.add_hparams(hyperparams, metrics)
+    writer.add_embedding(torch.tensor(C@alpha), metadata=metadata, metadata_header=["Subtype","Subpop"])
+
+
+    model_name = f'OraclePRSSNP_{sim_id}_{random_init}'
+    log_dir = os.path.join(f'{simulation_results_path}/logs/tensorboard', model_name)
+    writer = SummaryWriter(log_dir)
+    sil_score, nmi, ari, purity = calc_cluster_metrics(X@gamma, true_subtypes['true subtype'].values)
+    sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(X@gamma, true_subpops['true subpop'].values) # clustering per confounders
+    hyperparams = {"MODEL":"OraclePRSSNP","SIM":sim_id,"INIT":random_init,"Adjusted":1,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
+                "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
+    metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':1, 'R2 D,Alpha':1, 
+               'B rel. orth. norm':float('nan'),'D rel. orth. norm.': float('nan'), 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
+                "Max mem (MB)": float('nan'), "CPU time":float('nan'), "User time":float('nan'), "Success": 1}
+    writer.add_hparams(hyperparams, metrics)
+    writer.add_embedding(torch.tensor(X@gamma), metadata=metadata, metadata_header=["Subtype","Subpop"])
 
 sys.stdout.flush()
 sys.stderr.flush()

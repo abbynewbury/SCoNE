@@ -4,20 +4,12 @@ import tensorly as tl
 from tensortools.operations import khatri_rao
 from functools import partial
 from scipy.optimize import minimize
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-from torch.utils.tensorboard import SummaryWriter
-# # Fix tensorboard problem
-# import tensorflow as tf
-# import tensorboard as tb
 
 
 def OPT_FG(v, T, T_norm_squared, rank, reg_param):
     """Computes the CP function and gradient for a 3-way tensor."""
     # Convert vector v to matrices A, B, D
-    A, B, D = vec2mats(v, rank, T.shape[0], T.shape[1], T.shape[2])
+    A, B, D = vec2mats(v, shapes=[(T.shape[0],rank), (T.shape[1],rank), (T.shape[2],rank)])
     
     # Compute Gramian matrices
     S1 = A.T @ A
@@ -39,12 +31,12 @@ def OPT_FG(v, T, T_norm_squared, rank, reg_param):
     f = LS+ L_ortho
 
     # Convert gradients to vector form
-    g = mats2vec(G1, G2, G3)
+    g = mats2vec([G1, G2, G3])
     
     return f, g
 
 def rel_error_calc(v,T,T_norm,rank, reg_param):
-    A, B, D = vec2mats(v, rank, T.shape[0], T.shape[1], T.shape[2])
+    A, B, D = vec2mats(v, shapes=[(T.shape[0],rank), (T.shape[1],rank), (T.shape[2],rank)])
     # relative error calc
     rel_error = np.linalg.norm(T - tl.cp_to_tensor((np.array([1]*rank),[A,B,D])))/T_norm
     # LS (Least squares)
@@ -62,13 +54,18 @@ def cp_opt(T, T_norm, rank, a, b, d, reg_param, method, writer, options):
         loss_history.append(rel_error_calc(v, T, T_norm,rank, reg_param))
     callback_with_args = partial(callback, T=T, T_norm=T_norm,rank=rank, reg_param=reg_param)
     # tol=0 forces specific number of iterations
-    v_init = mats2vec(a,b,d)
+    v_init = mats2vec([a,b,d])
     result = minimize(OPT_FG,v_init, method=method, jac=True, args=(T, T_norm**2, rank, reg_param),options=options,callback=callback_with_args)
     if result.success is not True:
         print(f'OPTIMIZATION NOT SUCCESSFUL: {result}', flush=True)
-    A,B,D = vec2mats(result.x, rank, T.shape[0], T.shape[1], T.shape[2])
+    A,B,D = vec2mats(result.x, shapes=[(T.shape[0],rank), (T.shape[1],rank), (T.shape[2],rank)])
     # add in loss
     if writer is not None:
+        import torch
+        import torch.nn as nn
+        import torch.nn.functional as F
+        from torch.utils.data import Dataset, DataLoader
+        from torch.utils.tensorboard import SummaryWriter
         for iteration in range(len(loss_history)):
             writer.add_scalar('Relative Error', loss_history[iteration][0], iteration)
             writer.add_scalar('LS', loss_history[iteration][1], iteration)

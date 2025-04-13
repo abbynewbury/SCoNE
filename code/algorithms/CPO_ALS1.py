@@ -2,52 +2,46 @@ import numpy as np
 from utilities import f_unfold
 import tensorly as tl
 from tensortools.operations import khatri_rao
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-from torch.utils.tensorboard import SummaryWriter
-# # Fix tensorboard problem
-# import tensorflow as tf
-# import tensorboard as tb
 
-def cpo_als1(T, T_norm, rank, a, b, d, writer, max_iter=50, tol=1e-4):
-    # decompose with orthogonality constraint on b and d
+def cpo_als1(T, T_norm, rank, A, B, D, writer, max_iter=100, tol=1e-4):
+    # decompose with orthogonality constraint on B and D
     # simplification taken from Sorensen: CANONICAL POLYADIC DECOMPOSITION WITH A COLUMNWISE ORTHONORMAL FACTOR MATRIX
 
-    # a = np.random.random((tensor.shape[0], rank))
-    # b = np.random.random((tensor.shape[1], rank))
-    # d = np.random.random((tensor.shape[2], rank))
 
     e = []
     rel_error = []
 
     for epoch in range(max_iter):
         # optimize b
-        U, E, V_T = np.linalg.svd(khatri_rao([d, a]).T@f_unfold(T,1).T, full_matrices=False)
-        b = (U@V_T).T
-        assert np.allclose(b.T@b, np.eye(b.shape[1]))
+        U, E, V_T = np.linalg.svd(khatri_rao([D, A]).T@f_unfold(T,1).T, full_matrices=False)
+        B = (U@V_T).T
+        assert np.allclose(B.T@B, np.eye(B.shape[1]))
 
         # optimize d
-        U, E, V_T = np.linalg.svd(khatri_rao([b, a]).T@f_unfold(T,2).T, full_matrices=False)
-        d = (U@V_T).T
-        assert np.allclose(d.T@d, np.eye(d.shape[1]))
+        U, E, V_T = np.linalg.svd(khatri_rao([B, A]).T@f_unfold(T,2).T, full_matrices=False)
+        D = (U@V_T).T
+        assert np.allclose(D.T@D, np.eye(D.shape[1]))
 
         # optimize a
-        a = f_unfold(T,0)@khatri_rao([d, b])
+        A = f_unfold(T,0)@khatri_rao([D, B])
 
-        a_b_d = tl.cp_to_tensor((np.array([1]*rank), [a,b,d]))
-        e_t = np.linalg.norm(T - a_b_d)
+        A_B_D = tl.cp_to_tensor((np.array([1]*rank), [A,B,D]))
+        e_t = np.linalg.norm(T - A_B_D)
         e.append(e_t)
         rel_error.append(e_t/T_norm)
 
         if writer is not None:
+            import torch
+            import torch.nn as nn
+            import torch.nn.functional as F
+            from torch.utils.data import Dataset, DataLoader
+            from torch.utils.tensorboard import SummaryWriter
             writer.add_scalar('Relative Error', e_t/T_norm, epoch)
         
-        if (epoch>0) and (e[epoch] - e[epoch-1] < tol*T_norm):
+        if (epoch>0) and (e[epoch-1] - e[epoch] < tol*T_norm):
             success = True
             message = None
-            return a, b, d,rel_error,success,message
+            return A, B, D,rel_error,success,message
     success = False
     message = f'Reached # iterations: {max_iter}'
-    return a, b, d,rel_error,success,message
+    return A, B, D,rel_error,success,message

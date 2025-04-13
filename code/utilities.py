@@ -20,37 +20,49 @@ def f_refold(tensor, original_shape, mode=0):
 
 
 # As vec2mats per Kolda textbook
-def vec2mats(v, rank, T_0, T_1, T_2): 
-    """ Converts a vector into matrices A, B, D based on given shapes.
-    T_0: shape of first mode of T
-    T_1: shape of second mode of T
-    T_2: shape of third mode of T
+def vec2mats(v, shapes): 
+    """ Converts a vector into matrices based on given shapes.
+    shapes is list of tuples defining shapes of each matrix to be formed
     """
-    A = v[:T_0*rank].reshape(T_0, rank, order='F')
-    B = v[T_0*rank:T_0*rank+T_1*rank].reshape(T_1, rank, order='F')
-    D = v[T_0*rank+T_1*rank:].reshape(T_2, rank, order='F')
-    return A, B, D
+    place_sum = 0
+    mats = []
+    for dim in shapes:
+        size = dim[0]*dim[1]
+        mats.append(v[place_sum:place_sum+size].reshape(dim[0], dim[1], order='F'))
+        place_sum += size
+    return mats
 
 #As mats2vec per Kolda textbook
-def mats2vec(G1, G2, G3):
+def mats2vec(mats):
     """ Converts matrices back to vector form."""
-    return np.concatenate([G1.flatten(order='F'), G2.flatten(order='F'), G3.flatten(order='F')])
+    return np.concatenate([mat.flatten(order='F') for mat in mats])
 
 # How our tensor is constructed: MZ_X: SNP data (w/ or w/out covs residualized), MZ_C: clinical data (w/ or w/out covs residualized)
 def tensor_func(i, j, k, MZ_X, MZ_C):
     return MZ_X[i,j] * MZ_C[i,k]
 
 # Algorithm comparison functions
-def profile_function(func, *args, **kwargs):
+def profile_function(func, *args, mem_target='function', **kwargs):
     gc.collect()
     start_time = time.process_time()
     start_user_time = os.times().user
-    start_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    if mem_target == 'function':
+        start_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    elif mem_target == 'subprocess':
+        start_mem = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
 
     result = func(*args, **kwargs)  # Run the function
     gc.collect()
-    max_mem = (resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - start_mem) / 1024  # Convert KB to MB
+
+    if mem_target == 'function':
+        end_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    else:  # 'subprocess'
+        end_mem = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+    max_mem = (end_mem - start_mem) / 1024  # KB to MB
     cpu_time = time.process_time() - start_time
     user_time = os.times().user - start_user_time
 
-    return *result, max_mem, cpu_time, user_time
+    if isinstance(result, tuple):
+        return (*result, max_mem, cpu_time, user_time)
+    else:
+        return result, max_mem, cpu_time, user_time
