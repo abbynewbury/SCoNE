@@ -1,13 +1,12 @@
-#! /gpfs/commons/home/anewbury/miniconda/envs/jupyter/bin/python3
+#! /gpfs/commons/home/anewbury/miniconda/envs/tf_env/bin/python3
 #SBATCH --job-name=rwas_sim
 #SBATCH --nodes=1
-#SBATCH --mem=2G
+#SBATCH --mem=16G
 #SBATCH --cpus-per-task=8
 #SBATCH --time=120:00:00
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-user=anewbury@nygenome.org
-#SBATCH --output=/dev/null
-#SBATCH --error=/dev/null
+
 
 
 import sys
@@ -197,8 +196,9 @@ def calc_metrics(a, b, d,true_vals, gamma, alpha):
     return sil_score, nmi, ari, purity,ortho_norm_b,ortho_norm_d, abs(pearson_r_b_gamma[:,0]).mean(), abs(pearson_r_d_alpha[:,0]).mean()
 
 #3. RUN MODELS ON DATA 
+data = []
 # run five trials with different random initializations
-for random_init in range(1): # TODO: switch back to 5
+for random_init in range(5): 
 
     # ensure that they start at same random init
     A_init = np.random.random((T.shape[0], rank))
@@ -219,11 +219,12 @@ for random_init in range(1): # TODO: switch back to 5
     sil_score, nmi, ari, purity, ortho_norm_b, ortho_norm_d, pearson_r_b_gamma, pearson_r_d_alpha = calc_metrics(A,B,D,true_subtypes['true subtype'].values, gamma, alpha) # clustering per true subtypes
     sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(A, true_subpops['true subpop'].values) # clustering per confounders
     hyperparams = {"MODEL":"ALS","SIM":sim_id,"INIT":random_init,"Adjusted":0,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
-                   "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
+                   "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance,"reg_param":float('nan')}
     metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':pearson_r_b_gamma, 'R2 D,Alpha':pearson_r_d_alpha, 
                'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
                 "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": 1 if success is True else 0}
     writer.add_hparams(hyperparams, metrics)
+    data.append((hyperparams, metrics))
     writer.add_embedding(torch.tensor(A), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
     np.save(f'{simulation_results_path}/factor_matrices/A_{model_name}.npy', A) 
     np.save(f'{simulation_results_path}/factor_matrices/B_{model_name}.npy', B)
@@ -240,11 +241,12 @@ for random_init in range(1): # TODO: switch back to 5
     sil_score, nmi, ari, purity, ortho_norm_b, ortho_norm_d, pearson_r_b_gamma, pearson_r_d_alpha = calc_metrics(A,B,D,true_subtypes['true subtype'].values, gamma, alpha) # clustering per true subtypes
     sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(A, true_subpops['true subpop'].values) # clustering per confounders
     hyperparams = {"MODEL":"CLIGEN","SIM":sim_id,"INIT":random_init,"Adjusted":0,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
-                   "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
+                   "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance,"reg_param":float('nan')}
     metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':pearson_r_b_gamma, 'R2 D,Alpha':pearson_r_d_alpha, 
                'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
                 "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": 1 if success is True else 0}
     writer.add_hparams(hyperparams, metrics)
+    data.append((hyperparams, metrics))
     writer.add_embedding(torch.tensor(A), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
     np.save(f'{simulation_results_path}/factor_matrices/A_{model_name}.npy', A) 
     np.save(f'{simulation_results_path}/factor_matrices/B_{model_name}.npy', B)
@@ -278,11 +280,12 @@ for random_init in range(1): # TODO: switch back to 5
         sil_score, nmi, ari, purity, ortho_norm_b, ortho_norm_d, pearson_r_b_gamma, pearson_r_d_alpha = calc_metrics(A,B,D,true_subtypes['true subtype'].values, gamma, alpha) # clustering per true subtypes
         sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(A, true_subpops['true subpop'].values) # clustering per confounders
         hyperparams = {"MODEL":f"OPT({solver})","SIM":sim_id,"INIT":random_init,"Adjusted":0,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
-                    "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
+                    "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance,"reg_param":reg_param}
         metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':pearson_r_b_gamma, 'R2 D,Alpha':pearson_r_d_alpha, 
                 'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
                     "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": 1 if success is True else 0}
         writer.add_hparams(hyperparams, metrics)
+        data.append((hyperparams, metrics))
         writer.add_embedding(torch.tensor(A), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
         # write a,b,d as well
         np.save(f'{simulation_results_path}/factor_matrices/A_{model_name}.npy', A) 
@@ -298,11 +301,12 @@ for random_init in range(1): # TODO: switch back to 5
         sil_score, nmi, ari, purity, ortho_norm_b, ortho_norm_d, pearson_r_b_gamma, pearson_r_d_alpha = calc_metrics(A,B,D,true_subtypes['true subtype'].values, gamma, alpha) # clustering per true subtypes
         sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(A, true_subpops['true subpop'].values) # clustering per confounders
         hyperparams = {"MODEL":f"OPT_adj({solver})","SIM":sim_id,"INIT":random_init,"Adjusted":1,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
-                    "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
+                    "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance,"reg_param":reg_param}
         metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':pearson_r_b_gamma, 'R2 D,Alpha':pearson_r_d_alpha, 
                 'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
                     "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": 1 if success is True else 0}
         writer.add_hparams(hyperparams, metrics)
+        data.append((hyperparams, metrics))
         writer.add_embedding(torch.tensor(A), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
         # write a,b,d as well
         np.save(f'{simulation_results_path}/factor_matrices/A_{model_name}.npy', A) 
@@ -318,11 +322,12 @@ for random_init in range(1): # TODO: switch back to 5
     sil_score, nmi, ari, purity, ortho_norm_b, ortho_norm_d, pearson_r_b_gamma, pearson_r_d_alpha = calc_metrics(A,B,D,true_subtypes['true subtype'].values, gamma, alpha) # clustering per true subtypes
     sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(A, true_subpops['true subpop'].values) # clustering per confounders
     hyperparams = {"MODEL":"CPO-ALS1","SIM":sim_id,"INIT":random_init,"Adjusted":0,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
-                "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
+                "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance,"reg_param":float('nan')}
     metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':pearson_r_b_gamma, 'R2 D,Alpha':pearson_r_d_alpha, 
                'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
                 "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": 1 if success is True else 0}
     writer.add_hparams(hyperparams, metrics)
+    data.append((hyperparams, metrics))
     writer.add_embedding(torch.tensor(A), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
     # write a,b,d as well
     np.save(f'{simulation_results_path}/factor_matrices/A_{model_name}.npy', A) 
@@ -337,11 +342,12 @@ for random_init in range(1): # TODO: switch back to 5
     sil_score, nmi, ari, purity, ortho_norm_b, ortho_norm_d, pearson_r_b_gamma, pearson_r_d_alpha = calc_metrics(A,B,D,true_subtypes['true subtype'].values, gamma, alpha) # clustering per true subtypes
     sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(A, true_subpops['true subpop'].values) # clustering per confounders
     hyperparams = {"MODEL":"JointMF","SIM":sim_id,"INIT":random_init,"Adjusted":1,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
-                "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
+                "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance,"reg_param":float('nan')}
     metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':pearson_r_b_gamma, 'R2 D,Alpha':pearson_r_d_alpha, 
                'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
                 "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": 1 if success is True else 0}
     writer.add_hparams(hyperparams, metrics)
+    data.append((hyperparams, metrics))
     writer.add_embedding(torch.tensor(A), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
     # write a,b,d as well
     np.save(f'{simulation_results_path}/factor_matrices/A_{model_name}.npy', A) 
@@ -356,11 +362,12 @@ for random_init in range(1): # TODO: switch back to 5
     sil_score, nmi, ari, purity, ortho_norm_b, ortho_norm_d, pearson_r_b_gamma, pearson_r_d_alpha = calc_metrics(A,B,D,true_subtypes['true subtype'].values, gamma, alpha) # clustering per true subtypes
     sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(A, true_subpops['true subpop'].values) # clustering per confounders
     hyperparams = {"MODEL":"HNMF","SIM":sim_id,"INIT":random_init,"Adjusted":1,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
-                "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
+                "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance,"reg_param":float('nan')}
     metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':pearson_r_b_gamma, 'R2 D,Alpha':pearson_r_d_alpha, 
                'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
                 "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": 1 if success is True else 0}
     writer.add_hparams(hyperparams, metrics)
+    data.append((hyperparams, metrics))
     writer.add_embedding(torch.tensor(A), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
     # write a,b,d as well
     np.save(f'{simulation_results_path}/factor_matrices/A_{model_name}.npy', A) 
@@ -392,11 +399,12 @@ for random_init in range(1): # TODO: switch back to 5
     sil_score, nmi, ari, purity, ortho_norm_b, ortho_norm_d, pearson_r_b_gamma, pearson_r_d_alpha = calc_metrics(A,B,D,true_subtypes['true subtype'].values, gamma, alpha) # clustering per true subtypes
     sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(A, true_subpops['true subpop'].values) # clustering per confounders
     hyperparams = {"MODEL":"MVBC","SIM":sim_id,"INIT":random_init,"Adjusted":0,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
-                "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
+                "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance,"reg_param":float('nan')}
     metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':pearson_r_b_gamma, 'R2 D,Alpha':pearson_r_d_alpha, 
                'B rel. orth. norm':ortho_norm_b,'D rel. orth. norm.': ortho_norm_d, 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
                 "Max mem (MB)": max_mem, "CPU time":cpu_time, "User time":user_time, "Success": 1 if success is True else 0}
     writer.add_hparams(hyperparams, metrics)
+    data.append((hyperparams, metrics))
     writer.add_embedding(torch.tensor(A), metadata=metadata, metadata_header=["Subtype","Subpop"]) # add embedding of A
     # write a,b,d as well
     np.save(f'{simulation_results_path}/factor_matrices/A_{model_name}.npy', A) 
@@ -410,11 +418,12 @@ for random_init in range(1): # TODO: switch back to 5
     sil_score, nmi, ari, purity = calc_cluster_metrics(C@alpha, true_subtypes['true subtype'].values)
     sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(C@alpha, true_subpops['true subpop'].values) # clustering per confounders
     hyperparams = {"MODEL":"OraclePRSCondition","SIM":sim_id,"INIT":random_init,"Adjusted":1,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
-                "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
+                "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance,"reg_param":float('nan')}
     metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':1, 'R2 D,Alpha':1, 
                'B rel. orth. norm':float('nan'),'D rel. orth. norm.': float('nan'), 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
                 "Max mem (MB)": float('nan'), "CPU time":float('nan'), "User time":float('nan'), "Success": 1}
     writer.add_hparams(hyperparams, metrics)
+    data.append((hyperparams, metrics))
     writer.add_embedding(torch.tensor(C@alpha), metadata=metadata, metadata_header=["Subtype","Subpop"])
 
 
@@ -424,14 +433,24 @@ for random_init in range(1): # TODO: switch back to 5
     sil_score, nmi, ari, purity = calc_cluster_metrics(X@gamma, true_subtypes['true subtype'].values)
     sil_score_conf, nmi_conf, ari_conf, purity_conf = calc_cluster_metrics(X@gamma, true_subpops['true subpop'].values) # clustering per confounders
     hyperparams = {"MODEL":"OraclePRSSNP","SIM":sim_id,"INIT":random_init,"Adjusted":1,"N":N, "S":S, "Q":Q, "p[0]":p[0], "S_null":s[0], "S_hom":s[1], "S_het":s[2], "pge":pge, "snp_hom_effects":snp_hom_effects,
-                "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance}
+                "snps_af_range_min":snps_af_range[0], "snps_af_range_max":snps_af_range[1], "mus_variance":mus_variance,"reg_param":float('nan')}
     metrics = {'Silhouette score': sil_score, 'NMI': nmi, 'ARI': ari, 'Purity': purity, 'R2 B,Gamma':1, 'R2 D,Alpha':1, 
                'B rel. orth. norm':float('nan'),'D rel. orth. norm.': float('nan'), 'Silhouette score (conf)':sil_score_conf, 'NMI (conf)':nmi_conf , 'ARI (conf)':ari_conf, 'Purity (conf)':purity_conf, 
                 "Max mem (MB)": float('nan'), "CPU time":float('nan'), "User time":float('nan'), "Success": 1}
     writer.add_hparams(hyperparams, metrics)
+    data.append((hyperparams, metrics))
     writer.add_embedding(torch.tensor(X@gamma), metadata=metadata, metadata_header=["Subtype","Subpop"])
+
+with open(f"{simulation_results_path}/logs/outputs/{sim_id}_data.json", "w") as f:
+    json.dump(data, f, indent=2)
+
+df = pd.DataFrame([ {**hparams, **metrics} for hparams, metrics in data ])
+print('writing',flush=True)
+df.to_csv(f"{simulation_results_path}/logs/outputs/{sim_id}_data.csv")
+
 
 sys.stdout.flush()
 sys.stderr.flush()
 stdout_file.close()
 stderr_file.close()
+
