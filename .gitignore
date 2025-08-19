@@ -3,3 +3,4 @@
 !*.py
 !.gitignore
 !readme.md
+!code/simulate_data.ipynb
