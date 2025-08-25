@@ -79,7 +79,16 @@ def loss_calc(v,X,C,Z,rank):
     return [f, bce_loss, poisson_loss]
 
 
-def jmf(X, C, Z, rank, A, B, D, B_prime, D_prime,  method, writer, options):
+def jmf(X, C, Z, rank,  method, writer, options, A=None, B=None, D=None, B_prime=None, D_prime=None):
+    '''
+    X: genetic data matrix
+    C: clinical data matrix
+    rank: specified rank for decomposition
+    method: solver method from scipy.optimize.minimize
+    writer: tensorboard writer if defined (else None)
+    make sure options are specific to solver method specified (if unsure look at scipy.optimize.minimize documentation)
+    A, B, D, B_prime, D_prime exist for initializing model
+    '''
     # make sure options are specific to solver method specified (if unsure look at scipy.optimize.minimize documentation)
     loss_history = []
     def callback(v,X,C,Z,rank):

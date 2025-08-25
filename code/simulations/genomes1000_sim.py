@@ -6,6 +6,7 @@ import umap
 from plotnine import *
 import os
 import pickle
+from sklearn.preprocessing import StandardScaler
 
 def prep_1000genomes_bed_file(root_dir, output):
     # change map and ped files to bed format
@@ -159,7 +160,7 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,
 
     # 4. simulate M binary clinical features
     # start with baseline probabiliyies
-    probs = np.full((len(iid_order), M), 0.1, dtype=float) # baseline prob of clinical feature is 0.1
+    C = np.random.binomial(10,0.1,(len(iid_order), M)) # baseline prob of clinical feature is 0.1
     clinical_assoc_df_rows = [] # index of clinical vars that are associated (and their strength)
     for phenotypic_subgroup in range(4):
         # index of randomly chosen, associated clinical variables 
@@ -172,9 +173,9 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,
         subj_ids = phenotypic_subgroups.loc[mask, "IID"].unique()
         # map subject IDs to row indices 
         row_idx = [i for i, iid in enumerate(iid_order) if iid in subj_ids]
-        probs[np.ix_(row_idx, assoc_idx[:n1])] = 0.6
-        probs[np.ix_(row_idx, assoc_idx[n1:n2])] = 0.5
-        probs[np.ix_(row_idx, assoc_idx[n2:])] = 0.4
+        C[np.ix_(row_idx, assoc_idx[:n1])] = np.random.binomial(n=10, p=0.6, size=(len(row_idx), n1))
+        C[np.ix_(row_idx, assoc_idx[n1:n2])] = np.random.binomial(n=10, p=0.5, size=(len(row_idx), n2-n1))
+        C[np.ix_(row_idx, assoc_idx[n2:])] = np.random.binomial(n=10, p=0.4, size=(len(row_idx), len(assoc_idx)-n2))
         clinical_assoc_df_rows += [
         {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.6, "indices": assoc_idx[:n1]},
         {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.5, "indices": assoc_idx[n1:n2]},
@@ -183,7 +184,6 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,
     clinical_assoc_df = pd.DataFrame(clinical_assoc_df_rows)
 
     # write C
-    C = (np.random.rand(len(iid_order), M) < probs).astype(int)
     np.save(f"{output_dir}/C_{output_file_suffix}.npy", C)
 
     # write simulation metadata
@@ -202,7 +202,7 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,
 
 
 
-# Data simulation evaluation
+# Functions for data simulation evaluation
 def clean_join(values):
     # remove empty strings
     vals = sorted(set(v for v in values if v != ''), key=lambda x: int(x))
@@ -231,9 +231,10 @@ def generate_umap_plot(mode, var_list, color_col, color_label, output_dir, igsr_
             genetic_subgroups_concat["IID"] = pd.Categorical(genetic_subgroups_concat["IID"], categories=iid_order, ordered=True)
             color_df = genetic_subgroups_concat.copy()
         C = np.load(f'{output_dir}/C_{output_suffix}.npy')# pick e=0.5
+        C_scaled = StandardScaler().fit_transform(C) # standardize matrix before UMAP
 
         reducer = umap.UMAP()
-        embedding = reducer.fit_transform(C)
+        embedding = reducer.fit_transform(C_scaled)
 
         plot_df = (pd.DataFrame(embedding, columns=["UMAP1", "UMAP2"], index=iid_order).
                     rename_axis("IID").reset_index().merge(color_df[['IID',color_col]], on='IID',how='inner'))
@@ -250,10 +251,33 @@ def generate_umap_plot(mode, var_list, color_col, color_label, output_dir, igsr_
         title = r"UMAP of clinical data at different e levels"
     p = (
         ggplot(plot_dfs, aes("UMAP1", "UMAP2", color=color_col))
-        + geom_point(alpha=0.7, size=2)
+        + geom_point(alpha=0.5, size=2)
         + labs(title=title, color=color_label)
         + facet_wrap(f'~{mode}',ncol=2,scales='free')
         + theme_minimal()
         + theme(figure_size=(8, 12),legend_title=element_text(size=9))
     )
     p.save(f'{output_dir}/umap_clinical_{mode}.pdf',dpi=300)
+
+def run_phenotypicsubgroup_gwas(output_dir,intermediate_file_dir,ps,e,cov_included,phenotypic_subgroup):
+    # define specific file paths
+    cov_file_suffix = '' if cov_included else '_NOPS'
+    output_suffix = f'ps_{ps}_e_{e}'
+
+    # write phenotype file
+    with open(f"{output_dir}/simulation_metadata_{output_suffix}.pkl", "rb") as f:
+        simulation_metadata = pickle.load(f)
+    phenotypic_subgroups = simulation_metadata['phenotypic_subgroups']
+    pheno = phenotypic_subgroups[phenotypic_subgroups['phenotypic_subgroup']==phenotypic_subgroup][['IID','subgroup']].rename(columns={'subgroup':'Phenotype'})
+    pheno['FID'] = pheno['IID']
+    pheno['Phenotype'] = pheno['Phenotype'].astype(int)
+    pheno[['FID','IID','Phenotype']].set_index('FID').to_csv(f'{intermediate_file_dir}/PHENOTYPE_FILE_Subgroup{phenotypic_subgroup}')
+
+    # run GWAS
+    result = subprocess.run(f'module unload plink && module load plink/2.0a5.13 && plink --bfile {output_dir}/X\
+                        --covar {intermediate_file_dir}/COVARIATE_FILE{cov_file_suffix} --covar-variance-standardize\
+                        --pheno {intermediate_file_dir}/PHENOTYPE_FILE_Subgroup{phenotypic_subgroup}\
+                        --glm omit-ref\
+                        --out {output_dir}/GWAS_RESULTS/PhenotypicSubgroup_{phenotypic_subgroup}_Geno_Cov_{cov_included}_ps_{ps}_e_{e}\
+                        --1 --no-pheno', shell=True, capture_output=True, text=True, executable='/bin/bash')
+    result.check_returncode()
