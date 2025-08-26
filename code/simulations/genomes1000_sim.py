@@ -160,7 +160,7 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,
 
     # 4. simulate M binary clinical features
     # start with baseline probabiliyies
-    C = np.random.binomial(10,0.1,(len(iid_order), M)) # baseline prob of clinical feature is 0.1
+    C = np.random.poisson(0.1,(len(iid_order), M)) # baseline prob of clinical feature is 0.1
     clinical_assoc_df_rows = [] # index of clinical vars that are associated (and their strength)
     for phenotypic_subgroup in range(4):
         # index of randomly chosen, associated clinical variables 
@@ -173,9 +173,9 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,
         subj_ids = phenotypic_subgroups.loc[mask, "IID"].unique()
         # map subject IDs to row indices 
         row_idx = [i for i, iid in enumerate(iid_order) if iid in subj_ids]
-        C[np.ix_(row_idx, assoc_idx[:n1])] = np.random.binomial(n=10, p=0.6, size=(len(row_idx), n1))
-        C[np.ix_(row_idx, assoc_idx[n1:n2])] = np.random.binomial(n=10, p=0.5, size=(len(row_idx), n2-n1))
-        C[np.ix_(row_idx, assoc_idx[n2:])] = np.random.binomial(n=10, p=0.4, size=(len(row_idx), len(assoc_idx)-n2))
+        C[np.ix_(row_idx, assoc_idx[:n1])] = np.random.poisson(1, size=(len(row_idx), n1))
+        C[np.ix_(row_idx, assoc_idx[n1:n2])] = np.random.poisson(0.75, size=(len(row_idx), n2-n1))
+        C[np.ix_(row_idx, assoc_idx[n2:])] = np.random.poisson(0.5, size=(len(row_idx), len(assoc_idx)-n2))
         clinical_assoc_df_rows += [
         {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.6, "indices": assoc_idx[:n1]},
         {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.5, "indices": assoc_idx[n1:n2]},

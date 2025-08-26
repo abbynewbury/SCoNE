@@ -1,3 +1,14 @@
+#! /gpfs/commons/home/anewbury/miniconda/envs/jupyter/bin/python3
+#SBATCH --job-name=SimulateData
+#SBATCH --nodes=1
+#SBATCH --mem=30G
+#SBATCH --cpus-per-task=16
+#SBATCH --time=120:00:00
+#SBATCH --mail-type=FAIL
+#SBATCH --mail-user=anewbury@nygenome.org
+#SBATCH --output=SimulateDataoutput.txt
+#SBATCH --error=SimulateDataerrors.txt
+
 import pandas as pd
 import subprocess
 from functools import reduce
@@ -5,7 +16,7 @@ import numpy as np
 import umap
 from plotnine import *
 import os
-from simulations.genomes1000_sim import *
+import sys
 from itertools import product
 from joblib import Parallel, delayed
 from functools import partial
@@ -16,7 +27,12 @@ root_dir = '/gpfs/commons/datasets/1000genomes'
 output_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/output'
 igsr_samples_filepath = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/input/igsr_samples.tsv'
 maf_by_superpop_filepath = f'{intermediate_file_dir}/maf_by_superpop'
+code_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/code'
 # DEFINE PATHS
+
+sys.path.append(code_dir)
+from simulations.genomes1000_sim import *
+
 
 # PARAMETERS
 generate_sim = True
@@ -62,13 +78,13 @@ if generate_sim:
 if evaluate_sim:
 # VISUAL EVALUATION (UMAP)
 
-    # # For ps # TODO- REMOVE LINE COMMEND
-    # generate_umap_plot(mode='ps', var_list=ps_list, color_col='Superpopulation name',
-    #                         color_label='Superpopulation', output_dir=output_dir,igsr_samples_filepath=igsr_samples_filepath)
+    # For ps
+    generate_umap_plot(mode='ps', var_list=ps_list, color_col='Superpopulation code',
+                            color_label='Superpopulation', output_dir=output_dir,igsr_samples_filepath=igsr_samples_filepath)
 
-    # # For e
-    # generate_umap_plot(mode='e', var_list=e_list, color_col='subgroup_value', 
-    #                         color_label='Genetic Subgroup', output_dir=output_dir)
+    # For e
+    generate_umap_plot(mode='e', var_list=e_list, color_col='subgroup_value', 
+                            color_label='Genetic Subgroup', output_dir=output_dir)
 
 
 # QUANTITATIVE EVALUATION (GWAS)
