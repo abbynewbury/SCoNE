@@ -1,4 +1,5 @@
-# Joint matrix factorization, loss function looks like: (min A,B,D) 1/2||X-AB||^2 + 1/2||C-AD||^2
+# Joint matrix factorization, loss function looks like: (min W,H_G,U_G,H_C,U_C) 1/2||G-WH_G-ZU_G||_{BCE Loss} + 1/2||C-WH_C-ZU_C||_{Generalized KL divergence}
+
 
 import numpy as np
 from utilities import f_unfold
@@ -13,91 +14,98 @@ from utilities import vec2mats, mats2vec
 def sigmoid(x):
   return 1 / (1 + np.exp(-x))
 
-def soft_plus(x):
-  return np.log(1 + np.exp(x))
+# def soft_plus(x):
+#   return np.log(1 + np.exp(x))
 
-def JMF_FG(v,X,C,Z,rank):
+def JMF_FG(v,G,C,Z,rank,lambda_W,lambda_H_G,lambda_H_C):
     '''
-    X,C,Z: known
+    G,C,Z: known
     this performs all at once optimization
     '''
-    A,B,D,B_prime,D_prime = vec2mats(v, shapes=[(X.shape[0],rank),(X.shape[1],rank),(C.shape[1],rank),(X.shape[1],Z.shape[1]),(C.shape[1],Z.shape[1])])
+    W,H_G,H_C,U_G,U_C = vec2mats(v, shapes=[(G.shape[0],rank),(G.shape[1],rank),(C.shape[1],rank),(G.shape[1],Z.shape[1]),(C.shape[1],Z.shape[1])])
 
     # define nec. elements
-    X_hat = sigmoid(A@B.T + Z@B_prime.T)
+    G_hat = sigmoid(W@H_G.T + Z@U_G.T)
     # clipping for log purposes
-    X_hat = np.clip(X_hat, 1e-7, 1 - 1e-7)
-    C_hat = soft_plus(A@D.T + Z@D_prime.T)
+    G_hat = np.clip(G_hat, 1e-7, 1 - 1e-7)
+    C_hat = W@H_C.T + Z@U_C.T
 
-    E_x = np.ones(X.shape)
+    E_g = np.ones(G.shape)
     E_c = np.ones(C.shape)
 
-    X_tilde = np.divide(X,X_hat)
-    X_bar = np.divide(E_x-X,E_x-X_hat)
+    G_tilde = np.divide(G,G_hat)
+    G_bar = np.divide(E_g-G,E_g-G_hat)
     C_tilde = np.divide(C,C_hat)
 
     # define loss
-    bce_loss = np.sum(-np.multiply(X,np.log(X_hat)) - np.multiply(E_x-X,np.log(E_x-X_hat)))
-    poisson_loss = np.sum(-np.multiply(C,np.log(C_hat)) + C_hat + gammaln(C + 1)) # log(C!) can help stabalize
-    if poisson_loss < 0:
-        assert True == False, "Poisson loss negative"
+    bce_loss = np.sum(-np.multiply(G,np.log(G_hat)) - np.multiply(E_g-G,np.log(E_g-G_hat)))
+    kl_div_loss = np.sum(-np.multiply(C,np.log(C_hat)) + C_hat + gammaln(C + 1)) # log(C!) can help stabilize
+    regularization = lambda_W/2* np.trace(W.T @ W) +  lambda_H_G/2* np.trace(H_G.T @ H_G) +  lambda_H_C/2* np.trace(H_C.T @ H_C)
+    if kl_div_loss < 0:
+        assert True == False, "KL divergence loss negative"
     if bce_loss < 0:
         assert True == False, "BCE loss negative"
-    f = bce_loss + poisson_loss
+    f = bce_loss + kl_div_loss + regularization 
 
     # calculate gradients wrt all unknowns
     # precompute certain factors
-    U1 = np.multiply(np.multiply(-X_tilde + X_bar,X_hat),E_x - X_hat)
+    U1 = np.multiply(np.multiply(-G_tilde + G_bar,G_hat),E_g - G_hat)
     U2 = E_c - C_tilde
-    U3 = sigmoid(A@D.T + Z@D_prime.T) # derivative of softplus is sigmoid
-    U2_U3 = np.multiply(U2,U3)
 
-    GA = U1@B + U2_U3@D
-    GB = (A.T@U1).T
-    GD = (A.T@U2_U3).T
-    GB_prime = (Z.T@U1).T
-    GD_prime = (Z.T@U2_U3).T
+    GW = U1@H_G + U2@H_C + lambda_W*W
+    GH_G = (W.T@U1).T + lambda_H_G*H_G
+    GH_C = (W.T@U2).T + lambda_H_C*H_C
+    GU_G = (Z.T@U1).T
+    GU_C = (Z.T@U2).T
 
     # Convert gradients to vector form
-    g = mats2vec([GA, GB, GD, GB_prime, GD_prime])
+    g = mats2vec([GW, GH_G, GH_C, GU_G, GU_C])
     return f, g
 
-def loss_calc(v,X,C,Z,rank):
-    A, B, D, B_prime, D_prime = vec2mats(v, shapes=[(X.shape[0],rank),(X.shape[1],rank),(C.shape[1],rank),(X.shape[1],Z.shape[1]),(C.shape[1],Z.shape[1])])
-    X_hat = sigmoid(A@B.T + Z@B_prime.T)
+def loss_calc(v,G,C,Z,rank,lambda_W,lambda_H_G,lambda_H_C): 
+    W, H_G, H_C, U_G, U_C = vec2mats(v, shapes=[(G.shape[0],rank),(G.shape[1],rank),(C.shape[1],rank),(G.shape[1],Z.shape[1]),(C.shape[1],Z.shape[1])])
+    # define nec. elements
+    G_hat = sigmoid(W@H_G.T + Z@U_G.T)
     # clipping for log purposes
-    X_hat = np.clip(X_hat, 1e-7, 1 - 1e-7)
-    C_hat = soft_plus(A@D.T + Z@D_prime.T)
-    E_x = np.ones(X.shape)
+    G_hat = np.clip(G_hat, 1e-7, 1 - 1e-7)
+    C_hat = W@H_C.T + Z@U_C.T
 
-    # define loss
-    bce_loss = np.sum(-np.multiply(X,np.log(X_hat)) - np.multiply(E_x-X,np.log(E_x-X_hat)))
-    poisson_loss = np.sum(-np.multiply(C,np.log(C_hat)) + C_hat + gammaln(C + 1)) # log(C!) can help stabalize
-    # print(f'bce loss: {bce_loss}')
-    # print(f'poisson loss:{poisson_loss}')
-    f = bce_loss + poisson_loss
-    return [f, bce_loss, poisson_loss]
+    E_g = np.ones(G.shape)
+
+    bce_loss = np.sum(-np.multiply(G,np.log(G_hat)) - np.multiply(E_g-G,np.log(E_g-G_hat)))
+    kl_div_loss = np.sum(-np.multiply(C,np.log(C_hat)) + C_hat + gammaln(C + 1)) # log(C!) can help stabilize
+    regularization = lambda_W/2* np.trace(W.T @ W) +  lambda_H_G/2* np.trace(H_G.T @ H_G) +  lambda_H_C/2* np.trace(H_C.T @ H_C)
+    f = bce_loss + kl_div_loss + regularization 
+    return [f, bce_loss, kl_div_loss, regularization]
 
 
-def jmf(X, C, Z, rank,  method, writer, options, A=None, B=None, D=None, B_prime=None, D_prime=None):
+def jmf(G, C, Z, rank, lambda_W, lambda_H_G, lambda_H_C, method, writer, options, W=None, H_G=None, H_C=None, U_G=None, U_C=None):
     '''
-    X: genetic data matrix
+    G: genetic data matrix
     C: clinical data matrix
     rank: specified rank for decomposition
+    lambda_W,lambda_H_G,lambda_H_C: regularization paramaters for W, H_G, H_C
     method: solver method from scipy.optimize.minimize
     writer: tensorboard writer if defined (else None)
     make sure options are specific to solver method specified (if unsure look at scipy.optimize.minimize documentation)
-    A, B, D, B_prime, D_prime exist for initializing model
+    W, H_G, H_C, U_G, U_C exist for initializing model (if any of them not defined, model is initialized within run)
     '''
     # make sure options are specific to solver method specified (if unsure look at scipy.optimize.minimize documentation)
     loss_history = []
-    def callback(v,X,C,Z,rank):
-        loss_history.append(loss_calc(v,X,C,Z,rank))
-    callback_with_args = partial(callback, X=X, C=C, Z=Z, rank=rank)
+    def callback(v,G,C,Z,rank):
+        loss_history.append(loss_calc(v,G,C,Z,rank,lambda_W,lambda_H_G,lambda_H_C))
+    callback_with_args = partial(callback, G=G, C=C, Z=Z, rank=rank)
     # tol=0 forces specific number of iterations
-    v_init = mats2vec([A, B, D, B_prime, D_prime])
-    result = minimize(JMF_FG,v_init, method=method, jac=True, args=(X,C,Z,rank),options=options,callback=callback_with_args)
-    A,B,D, B_prime, D_prime= vec2mats(result.x, shapes=[(X.shape[0],rank),(X.shape[1],rank),(C.shape[1],rank),(X.shape[1],Z.shape[1]),(C.shape[1],Z.shape[1])])
+    if not all(matrix is not None for matrix in [W, H_G, H_C, U_G, U_C]): # at least one matrix not pre-initialized - initialize all
+        W = np.random.random((G.shape[0], rank))
+        H_G = np.random.random((G.shape[1], rank))
+        H_C = np.random.random((C.shape[1], rank))
+        U_G = np.random.random((G.shape[1], Z.shape[1]))
+        U_C = np.random.random((C.shape[1], Z.shape[1]))
+    v_init = mats2vec([W, H_G, H_C, U_G, U_C])
+ 
+    result = minimize(JMF_FG,v_init, method=method, jac=True, args=(G,C,Z,rank,lambda_W,lambda_H_G,lambda_H_C),options=options,callback=callback_with_args)
+    W,H_G,H_C,U_G,U_C= vec2mats(result.x, shapes=[(G.shape[0],rank),(G.shape[1],rank),(C.shape[1],rank),(G.shape[1],Z.shape[1]),(C.shape[1],Z.shape[1])])
     # add in loss
     if writer is not None:
         import torch
@@ -109,5 +117,4 @@ def jmf(X, C, Z, rank,  method, writer, options, A=None, B=None, D=None, B_prime
             writer.add_scalar('Loss', loss_history[iteration][0], iteration)
             writer.add_scalar('BCE Loss', loss_history[iteration][1], iteration)
             writer.add_scalar('Poisson Loss', loss_history[iteration][2], iteration)
-    return A,B,D,B_prime, D_prime, loss_history, result.success, result.message
-
+    return W, H_G, H_C, U_G, U_C, loss_history, result.success, result.message

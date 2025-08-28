@@ -27,6 +27,7 @@ root_dir = '/gpfs/commons/datasets/1000genomes'
 output_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/output'
 igsr_samples_filepath = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/input/igsr_samples.tsv'
 maf_by_superpop_filepath = f'{intermediate_file_dir}/maf_by_superpop'
+admixture_filepath = f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.P'
 code_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/code'
 # DEFINE PATHS
 
@@ -35,11 +36,12 @@ from simulations.genomes1000_sim import *
 
 
 # PARAMETERS
-generate_sim = True
+generate_sim = False
 evaluate_sim = True
 # generate all combinations of e and ps variables
 ps_list = np.round(np.arange(0, 1.0, 0.1),1)
 e_list = np.round(np.arange(0, 1.1, 0.1),1)
+af_variance_grouping_list = ['superpopulation','admixture']
 # PARAMETERS
 
 
@@ -57,7 +59,7 @@ if generate_sim:
 
     run_one = partial(
         sun_generate_sim_data,
-        bfile_path=f'{output_dir}/X', maf_by_superpop_filepath=f'{intermediate_file_dir}/maf_by_superpop',
+        bfile_path=f'{output_dir}/X', af_df_filepath=f'{intermediate_file_dir}/maf_by_superpop',
         intermediate_file_dir=intermediate_file_dir,
         output_dir=output_dir,
         num_markers_assoc=2000,
@@ -68,8 +70,9 @@ if generate_sim:
 
     results = Parallel(n_jobs=-1)(
         delayed(run_one)(
-            ps=ps, e=e, intermediate_file_suffix=f'ps_{ps}_e_{e}', output_file_suffix=f'ps_{ps}_e_{e}') 
-            for ps, e in product(ps_list, e_list)
+            ps=ps, e=e, af_variance_grouping=af_variance_grouping, intermediate_file_suffix=f'ps_{ps}_e_{e}_afgrouping_{af_variance_grouping}', output_file_suffix=f'ps_{ps}_e_{e}_afgrouping_{af_variance_grouping}',
+            af_df_filepath=maf_by_superpop_filepath if af_variance_grouping=='superpopulation' else admixture_filepath) 
+            for ps, e, af_variance_grouping in product(ps_list, e_list,af_variance_grouping_list)
         )
 
 
@@ -77,14 +80,14 @@ if generate_sim:
 
 if evaluate_sim:
 # VISUAL EVALUATION (UMAP)
+    for af_variance_grouping in af_variance_grouping_list:
+        # For ps
+        generate_umap_plot(mode='ps', af_variance_grouping=af_variance_grouping, var_list=ps_list, color_col='Superpopulation code',
+                                color_label='Superpopulation', output_dir=output_dir,igsr_samples_filepath=igsr_samples_filepath)
 
-    # For ps
-    generate_umap_plot(mode='ps', var_list=ps_list, color_col='Superpopulation code',
-                            color_label='Superpopulation', output_dir=output_dir,igsr_samples_filepath=igsr_samples_filepath)
-
-    # For e
-    generate_umap_plot(mode='e', var_list=e_list, color_col='subgroup_value', 
-                            color_label='Genetic Subgroup', output_dir=output_dir)
+        # For e
+        generate_umap_plot(mode='e', af_variance_grouping=af_variance_grouping, var_list=e_list, color_col='subgroup_value', 
+                                color_label='Genetic Subgroup', output_dir=output_dir)
 
 
 # QUANTITATIVE EVALUATION (GWAS)
@@ -106,6 +109,6 @@ if evaluate_sim:
 
     results = Parallel(n_jobs=-1)(
         delayed(run_one)(
-            ps=ps, e=e, cov_included=cov_included, phenotypic_subgroup=phenotypic_subgroup) 
-            for ps, e, cov_included, phenotypic_subgroup in product(ps_list, [0.0,0.5,1.0], [True,False], range(4))
+            ps=ps, e=e,af_variance_grouping=af_variance_grouping, cov_included=cov_included, phenotypic_subgroup=phenotypic_subgroup) 
+            for ps, e, af_variance_grouping, cov_included, phenotypic_subgroup in product(ps_list, [0.0,0.5,1.0], af_variance_grouping_list, [True,False], range(4))
         )
