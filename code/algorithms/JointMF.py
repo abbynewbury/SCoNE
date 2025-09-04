@@ -20,7 +20,6 @@ def sigmoid(x):
 def JMF_FG(v,G,C,Z,rank,lambda_W,lambda_H_G,lambda_H_C):
     '''
     G,C,Z: known
-    this performs all at once optimization
     '''
     W,H_G,H_C,U_G,U_C = vec2mats(v, shapes=[(G.shape[0],rank),(G.shape[1],rank),(C.shape[1],rank),(G.shape[1],Z.shape[1]),(C.shape[1],Z.shape[1])])
 
@@ -29,6 +28,8 @@ def JMF_FG(v,G,C,Z,rank,lambda_W,lambda_H_G,lambda_H_C):
     # clipping for log purposes
     G_hat = np.clip(G_hat, 1e-7, 1 - 1e-7)
     C_hat = W@H_C.T + Z@U_C.T
+    # clipping for log purposes
+    C_hat = np.clip(C_hat, 1e-7, 1 - 1e-7)
 
     E_g = np.ones(G.shape)
     E_c = np.ones(C.shape)
@@ -62,13 +63,14 @@ def JMF_FG(v,G,C,Z,rank,lambda_W,lambda_H_G,lambda_H_C):
     g = mats2vec([GW, GH_G, GH_C, GU_G, GU_C])
     return f, g
 
-def loss_calc(v,G,C,Z,rank,lambda_W,lambda_H_G,lambda_H_C): 
+def loss_calc(v,G,C,Z,rank,lambda_W,lambda_H_G,lambda_H_C): # TODO: maybe timing takes longer because we calculate loss twice
     W, H_G, H_C, U_G, U_C = vec2mats(v, shapes=[(G.shape[0],rank),(G.shape[1],rank),(C.shape[1],rank),(G.shape[1],Z.shape[1]),(C.shape[1],Z.shape[1])])
     # define nec. elements
     G_hat = sigmoid(W@H_G.T + Z@U_G.T)
     # clipping for log purposes
     G_hat = np.clip(G_hat, 1e-7, 1 - 1e-7)
     C_hat = W@H_C.T + Z@U_C.T
+    C_hat = np.clip(C_hat, 1e-7, 1 - 1e-7)
 
     E_g = np.ones(G.shape)
 
@@ -103,8 +105,8 @@ def jmf(G, C, Z, rank, lambda_W, lambda_H_G, lambda_H_C, method, writer, options
         U_G = np.random.random((G.shape[1], Z.shape[1]))
         U_C = np.random.random((C.shape[1], Z.shape[1]))
     v_init = mats2vec([W, H_G, H_C, U_G, U_C])
- 
-    result = minimize(JMF_FG,v_init, method=method, jac=True, args=(G,C,Z,rank,lambda_W,lambda_H_G,lambda_H_C),options=options,callback=callback_with_args)
+    bounds = [(0.0, None)] * v_init.size # positive projection
+    result = minimize(JMF_FG,v_init, method=method, jac=True, bounds=bounds, args=(G,C,Z,rank,lambda_W,lambda_H_G,lambda_H_C),options=options,callback=callback_with_args)
     W,H_G,H_C,U_G,U_C= vec2mats(result.x, shapes=[(G.shape[0],rank),(G.shape[1],rank),(C.shape[1],rank),(G.shape[1],Z.shape[1]),(C.shape[1],Z.shape[1])])
     # add in loss
     if writer is not None:

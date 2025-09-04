@@ -1,8 +1,8 @@
 #! /gpfs/commons/home/anewbury/miniconda/envs/jupyter/bin/python3
 #SBATCH --job-name=SimulateData
 #SBATCH --nodes=1
-#SBATCH --mem=30G
-#SBATCH --cpus-per-task=16
+#SBATCH --mem=50G
+#SBATCH --cpus-per-task=24
 #SBATCH --time=120:00:00
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-user=anewbury@nygenome.org
@@ -20,6 +20,7 @@ import sys
 from itertools import product
 from joblib import Parallel, delayed
 from functools import partial
+
 
 # DEFINE PATHS
 intermediate_file_dir ='/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/intermediate_plink'
@@ -39,9 +40,10 @@ from simulations.genomes1000_sim import *
 generate_sim = False
 evaluate_sim = True
 # generate all combinations of e and ps variables
-ps_list = np.round(np.arange(0, 1.0, 0.1),1)
-e_list = np.round(np.arange(0, 1.1, 0.1),1)
-af_variance_grouping_list = ['superpopulation','admixture']
+ps_list = [0.00, 0.25, 0.50, 0.75]
+e_list = [0.00, 0.25, 0.50, 0.75, 1]
+num_markers_assoc_list = [100,2000]
+init_list = range(100) # 100 random initializations for each combination
 # PARAMETERS
 
 
@@ -49,20 +51,20 @@ af_variance_grouping_list = ['superpopulation','admixture']
 
 if generate_sim:
     # RUN FILE SETUP
-    # generate genetic bfile (outputs to {output_dir}/X)
-    prep_1000genomes_bed_file(root_dir=root_dir, output=f'{output_dir}/X')
-    maf_by_superpop = calculate_maf_by_superpop(igsr_samples_filepath,intermediate_file_dir,bfile_path=f'{output_dir}/X',output=maf_by_superpop_filepath)
+    # generate genetic bfile (outputs to {output_dir}/G)
+    prep_1000genomes_bed_file(root_dir=root_dir, output=f'{output_dir}/G')
+    #maf_by_superpop = calculate_maf_by_superpop(igsr_samples_filepath,intermediate_file_dir,bfile_path=f'{output_dir}/G',output=maf_by_superpop_filepath)
     # get pcs - for later gwas evaluation
-    result = subprocess.run(f'module unload plink && module load flashpca && cd {output_dir} &&  flashpca --bfile {output_dir}/X --ndim 20', shell=True, capture_output=True, text=True, executable='/bin/bash')
+    result = subprocess.run(f'module unload plink && module load flashpca && cd {output_dir} &&  flashpca --bfile {output_dir}/G --ndim 20', shell=True, capture_output=True, text=True, executable='/bin/bash')
     # RUN FILE SETUP
 
 
+    # run with 2000 or 100 associated markers, 100 random initializations each
     run_one = partial(
         sun_generate_sim_data,
-        bfile_path=f'{output_dir}/X', af_df_filepath=f'{intermediate_file_dir}/maf_by_superpop',
+        bfile_path=f'{output_dir}/G', af_df_filepath=admixture_filepath,
         intermediate_file_dir=intermediate_file_dir,
         output_dir=output_dir,
-        num_markers_assoc=2000,
         extra_subgroups_size=200,
         M=100,
         num_clinical_assoc=10
@@ -70,9 +72,8 @@ if generate_sim:
 
     results = Parallel(n_jobs=-1)(
         delayed(run_one)(
-            ps=ps, e=e, af_variance_grouping=af_variance_grouping, intermediate_file_suffix=f'ps_{ps}_e_{e}_afgrouping_{af_variance_grouping}', output_file_suffix=f'ps_{ps}_e_{e}_afgrouping_{af_variance_grouping}',
-            af_df_filepath=maf_by_superpop_filepath if af_variance_grouping=='superpopulation' else admixture_filepath) 
-            for ps, e, af_variance_grouping in product(ps_list, e_list,af_variance_grouping_list)
+            ps=ps, e=e, num_markers_assoc=num_markers_assoc, intermediate_file_suffix=get_output_file_suffix(ps,e,init,num_markers_assoc), output_file_suffix=get_output_file_suffix(ps,e,init,num_markers_assoc)) 
+            for ps, e, init, num_markers_assoc in product(ps_list, e_list, init_list, num_markers_assoc_list)
         )
 
 
@@ -80,20 +81,19 @@ if generate_sim:
 
 if evaluate_sim:
 # VISUAL EVALUATION (UMAP)
-    for af_variance_grouping in af_variance_grouping_list:
-        # For ps
-        generate_umap_plot(mode='ps', af_variance_grouping=af_variance_grouping, var_list=ps_list, color_col='Superpopulation code',
-                                color_label='Superpopulation', output_dir=output_dir,igsr_samples_filepath=igsr_samples_filepath)
+    # # For ps
+    # generate_umap_plot(mode='ps', var_list=ps_list, color_col='Superpopulation code', 
+    #                         color_label='Superpopulation', output_dir=output_dir,igsr_samples_filepath=igsr_samples_filepath)
 
-        # For e
-        generate_umap_plot(mode='e', af_variance_grouping=af_variance_grouping, var_list=e_list, color_col='subgroup_value', 
-                                color_label='Genetic Subgroup', output_dir=output_dir)
+    # # For e
+    # generate_umap_plot(mode='e', var_list=e_list, color_col='subgroup_value', 
+    #                         color_label='Genetic Subgroup', output_dir=output_dir)
 
 
 # QUANTITATIVE EVALUATION (GWAS)
 
     # write to covariate file
-    igsr_samples = read_in_igsr_samples(igsr_samples_filepath, bfile_path=f'{output_dir}/X')
+    igsr_samples = read_in_igsr_samples(igsr_samples_filepath, bfile_path=f'{output_dir}/G')
     pcs = pd.read_csv(f'{output_dir}/pcs.txt',sep='\t')
     covar = pcs.merge(igsr_samples[['IID','Sex']], on='IID',how='inner')
     # probably cleaner way to do this
@@ -109,6 +109,6 @@ if evaluate_sim:
 
     results = Parallel(n_jobs=-1)(
         delayed(run_one)(
-            ps=ps, e=e,af_variance_grouping=af_variance_grouping, cov_included=cov_included, phenotypic_subgroup=phenotypic_subgroup) 
-            for ps, e, af_variance_grouping, cov_included, phenotypic_subgroup in product(ps_list, [0.0,0.5,1.0], af_variance_grouping_list, [True,False], range(4))
+            output_file_suffix=get_output_file_suffix(ps,e,init,num_markers_assoc),ps=ps, e=e, cov_included=cov_included, phenotypic_subgroup=phenotypic_subgroup) 
+            for ps, e, init, num_markers_assoc, cov_included, phenotypic_subgroup  in product(ps_list, [0.50], init_list, num_markers_assoc_list, [True,False],range(4))
         )

@@ -18,6 +18,14 @@ def prep_1000genomes_bed_file(root_dir, output):
     '''
     result = subprocess.run(plink_extract, shell=True, check=True, executable="/bin/bash")
 
+    # make .raw file for X matrix later
+    plink_extract = f'''
+    module load plink/1.9 && plink --bfile {output} \
+        --recode A \
+        --out {output}
+    '''
+    result = subprocess.run(plink_extract, shell=True, check=True, executable="/bin/bash")
+
 def read_in_igsr_samples(igsr_samples_filepath,bfile_path=None):
     # read in, subset to 2504, order correctly (if bfile path is not None)
     igsr_samples = pd.read_csv(igsr_samples_filepath,sep='\t')
@@ -35,38 +43,40 @@ def read_in_igsr_samples(igsr_samples_filepath,bfile_path=None):
 
     return igsr_samples
 
-def calculate_maf_by_superpop(igsr_samples_filepath,intermediate_file_dir,bfile_path,output):
-      # Calculate allele frequencies in five superpopulations
-      # generate superpopulation cluster file
-      igsr_samples = read_in_igsr_samples(igsr_samples_filepath,bfile_path)
-      igsr_samples[['FID','IID','Superpopulation code']].to_csv(f'{intermediate_file_dir}/superpop.clst',index=False,header=False,sep='\t')
-      # calculate maf by superpop
-      plink_freq = f''' module load plink/1.9 && 
-      plink --bfile {bfile_path} \
-            --freq \
-            --within {intermediate_file_dir}/superpop.clst \
-            --out {output}
-      '''
-      result = subprocess.run(plink_freq, shell=True, check=True, executable="/bin/bash")
+# def calculate_maf_by_superpop(igsr_samples_filepath,intermediate_file_dir,bfile_path,output):
+#       # Calculate allele frequencies in five superpopulations
+#       # generate superpopulation cluster file
+#       igsr_samples = read_in_igsr_samples(igsr_samples_filepath,bfile_path)
+#       igsr_samples[['FID','IID','Superpopulation code']].to_csv(f'{intermediate_file_dir}/superpop.clst',index=False,header=False,sep='\t')
+#       # calculate maf by superpop
+#       plink_freq = f''' module load plink/1.9 && 
+#       plink --bfile {bfile_path} \
+#             --freq \
+#             --within {intermediate_file_dir}/superpop.clst \
+#             --out {output}
+#       '''
+#       result = subprocess.run(plink_freq, shell=True, check=True, executable="/bin/bash")
 
-      maf_by_superpop = pd.read_csv(f'{intermediate_file_dir}/maf_by_superpop.frq.strat',sep='\s+')
-      return maf_by_superpop
+#       maf_by_superpop = pd.read_csv(f'{intermediate_file_dir}/maf_by_superpop.frq.strat',sep='\s+')
+#       return maf_by_superpop
+
+def get_output_file_suffix(ps,e,init,num_markers_assoc):
+    return f'ps_{ps}_e_{e}_init_{init}_markersassoc_{num_markers_assoc}'
 
 def sun_generate_sim_data(bfile_path, af_df_filepath,
                           intermediate_file_dir,intermediate_file_suffix,output_dir,output_file_suffix,
-                          ps,num_markers_assoc,e,extra_subgroups_size,M,num_clinical_assoc,af_variance_grouping):
+                          ps,num_markers_assoc,e,extra_subgroups_size,M,num_clinical_assoc):
     '''
     Generate synthetic data similar to Sun et al. (Multi-view biclustering for genotype-phenotype association studies of complex diseases)
     using 1000 Genomes Phase 3 data. Use admixture files which contain 193634 markers with MAF>5% and 2504 individuals. 
 
     PARAMS:
     bfile_path: path to bfile for genetic data
-    af_df_filepath: if af_variance_grouping = superpopulation: plink generated .frq.strat file for maf within each superpopulation group. don't include .frq.strat suffix in filename. 
-        if af_variance_grouping = admixture: pre-generated admixture fractions for K=5 (release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.P)
+    af_df_filepath: pre-generated admixture fractions for K=5 (release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.P)
     admixture_fractions_filepath: path
     intermediate_file_dir: dir to write intermediate files to (when using plink for example)
     intermediate_file_suffix: such that if multiple simulations are created, each is distinctly defined
-    output_file_suffix: such that if multiple simulations are created, each is distinctly defined - suffic for C and simulated data pkl file
+    output_file_suffix: such that if multiple simulations are created, each is distinctly defined - suffix for C and simulated data pkl file
     output_dir: where to write output genetic data matrix (X) in form of plink bfile, and clinical data matrix C
     M: number of clinical features (right now assuming all from one domain & all binary)
     ps: variable controlling how much population stratification is affecting geno-pheno relationship (needs to be in range(0,1,size=0.1)) 
@@ -75,7 +85,6 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,
     e: relative effect that genetic variation contributed to the effect of the phenotype. e in [0,1]. (decreased e means higher level of disagreement between genotypic and phenotypic subgroups)
     num_clinical_assoc: number of clinical features associated with subtype classification (same for all subtypes)
     extra_subgroups_size: number of people in s3 and s4 (selected at random)
-    af_variance_grouping: 'superpopulation' means calculate af variance based on 5 superpopulation groups, 'admixture' means calculate based on 5 admixture fractions
 
     outputs:
     C: clinical data matrix (num samples x M)
@@ -89,23 +98,15 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,
     '''
     assert num_clinical_assoc<M, "num_clinical_assoc cannot exceed M"
 
-    # 1. Read in allele frequencies per 5 superpopulations to estimate af variance across groups
-    if af_variance_grouping == 'superpopulation':
-        af_variance_df = pd.read_csv(f'{af_df_filepath}.frq.strat',sep='\s+')
-        superpopulations = af_variance_df['CLST'].unique()
-        af_variance_df = af_variance_df.pivot(index=['SNP'],columns='CLST',values='MAF').reset_index()
-        assert af_variance_df.shape[0] == 193634
-        af_variance_df['af_variance'] = af_variance_df[superpopulations].var(axis=1)
-        af_variance_df['af_var_decile'] = (pd.qcut(af_variance_df['af_variance'], 10, labels=False))/10 # discretize into equal size buckets based on deciles
-    else:
-        assert af_variance_grouping == 'admixture', 'only "admixture" or "superpopulation" are allowed'
-        af_variance_df = pd.read_csv(af_df_filepath,header=None,sep='\s+')
-        af_variance_df['af_variance'] =  af_variance_df[range(5)].var(axis=1)
-        af_variance_df['af_var_decile'] = (pd.qcut(af_variance_df['af_variance'], 10, labels=False))/10
-        # get marker id
-        bim_df = pd.read_csv(f'{bfile_path}.bim',sep='\s+',header=None)
-        bim_df.columns = ['CHR','SNP','CM','POS','A1','A2']
-        af_variance_df['SNP'] = bim_df['SNP'].values
+    # 1. Read in allele frequencies per 5 admixture fractions to estimate af variance across groups
+    assert ps in [0.00, 0.25, 0.50, 0.75], f"{ps} is not a valid value for ps, must be one of the quartile values in [0.00, 0.25, 0.50, 0.75]" 
+    af_variance_df = pd.read_csv(af_df_filepath,header=None,sep='\s+')
+    af_variance_df['af_variance'] =  af_variance_df[range(5)].var(axis=1)
+    af_variance_df['af_var_quartile'] = (pd.qcut(af_variance_df['af_variance'], 4, labels=[0.00, 0.25, 0.50, 0.75]))
+    # get marker id
+    bim_df = pd.read_csv(f'{bfile_path}.bim',sep='\s+',header=None)
+    bim_df.columns = ['CHR','SNP','CM','POS','A1','A2']
+    af_variance_df['SNP'] = bim_df['SNP'].values
 
 
     # 2. Generate genetic subgroups
@@ -113,8 +114,8 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,
     markers_assoc_dict = {} # names of the markers that are associated with each subgroup
     for genetic_subgroup in range(2):
         # Select SNP group based on num_markers_assoc and ps
-        assert af_variance_df[af_variance_df['af_var_decile']==ps].shape[0]>num_markers_assoc, f"number of genetic features assoc. ({num_markers_assoc}) is too large, only {af_variance_df[af_variance_df['af_var_decile']==ps].shape[0]} markers in decile {ps} group"
-        markers_assoc = af_variance_df[af_variance_df['af_var_decile']==ps].sample(n=num_markers_assoc, replace=False)['SNP'].values.tolist()
+        assert af_variance_df[af_variance_df['af_var_quartile']==ps].shape[0]>num_markers_assoc, f"number of genetic features assoc. ({num_markers_assoc}) is too large, only {af_variance_df[af_variance_df['af_var_quartile']==ps].shape[0]} markers in quartile {ps} group"
+        markers_assoc = af_variance_df[af_variance_df['af_var_quartile']==ps].sample(n=num_markers_assoc, replace=False)['SNP'].values.tolist()
         markers_assoc_dict[genetic_subgroup] = markers_assoc
         assert len(set(markers_assoc))==len(markers_assoc) # make sure ped file has unique rows
 
@@ -144,9 +145,7 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,
         raw[geno_cols] = (raw[geno_cols] > 0).astype(int) # recode s.t. values 1 and 2 map to 1
         genetic_subgroup_df = raw.set_index('IID')[geno_cols].sum(axis=1).reset_index(name=f'r')
         genetic_subgroup_df['genetic_subgroup'] = genetic_subgroup
-        
-        deciles, bins = pd.qcut(genetic_subgroup_df["r"], 10, labels=False, retbins=True)
-        genetic_subgroup_df[f'subgroup'] =genetic_subgroup_df['r']>bins[-3] # Top 20% of people per r
+        genetic_subgroup_df[f'subgroup'] =genetic_subgroup_df['r']>genetic_subgroup_df['r'].quantile(0.8) # Top 20% of people per r
         genetic_subgroups.append(genetic_subgroup_df)
     genetic_subgroups = pd.concat(genetic_subgroups)
 
@@ -154,12 +153,12 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,
     fam_df = pd.read_csv(f'{bfile_path}.fam',sep='\s+',header=None)
     fam_df.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
     iid_order = fam_df['IID'].values
-    # can just use bins[-4] - somewhat equivalent to 7.5
     phenotypic_subgroups = []
     for phenotypic_subgroup in range(2):
         phenotypic_subgroup_df = genetic_subgroups[genetic_subgroups['genetic_subgroup']==phenotypic_subgroup][['IID','r']].copy()
         phenotypic_subgroup_df['phenotypic_subgroup'] = phenotypic_subgroup
-        phenotypic_subgroup_df['subgroup'] = phenotypic_subgroup_df['r']*e + np.random.randn(len(phenotypic_subgroup_df)) > bins[-4]*e
+        # corresponding genetic subgroup value for r
+        phenotypic_subgroup_df['subgroup'] = phenotypic_subgroup_df['r']*e + np.random.randn(len(phenotypic_subgroup_df)) > ((7.5/8)*phenotypic_subgroup_df['r'].quantile(0.8))*e
         phenotypic_subgroups.append(phenotypic_subgroup_df)
     for phenotypic_subgroup in range(2,4):
         # randomly select extra_subgroups_size people
@@ -211,8 +210,6 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,
         pickle.dump(bundle, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     return genetic_subgroups, phenotypic_subgroups, C, iid_order, markers_assoc_dict, clinical_assoc_df 
-    
-
 
 
 # Functions for data simulation evaluation
@@ -221,21 +218,24 @@ def clean_join(values):
     vals = sorted(set(v for v in values if v != ''), key=lambda x: int(x))
     return ','.join(vals)
 
-def generate_umap_plot(mode, af_variance_grouping,var_list, color_col, color_label, output_dir, igsr_samples_filepath=None):
+def generate_umap_plot(mode, var_list, color_col, color_label, output_dir, igsr_samples_filepath=None): 
     '''Generate UMAP plot of C across different values of variable spcified in 'mode' 
-    (values in var_list), colored by color_df (which must have a column IID)'''
+    (values in var_list), colored by color_df (which must have a column IID)
+    
+    output dir and output suffix define where to find simulated data files
+    '''
     plot_dfs = []
     for var in var_list:
         if mode == 'ps':
-            output_suffix = f'ps_{var}_e_0.5_afgrouping_{af_variance_grouping}'
-            with open(f"{output_dir}/simulation_metadata_{output_suffix}.pkl", "rb") as f:
+            output_file_suffix = get_output_file_suffix(ps=var,e=0.5,init=0,num_markers_assoc=2000) # choose first initialization and 2000 markers assoc for vis purposes
+            with open(f"{output_dir}/simulation_metadata_{output_file_suffix}.pkl", "rb") as f:
                 simulation_metadata = pickle.load(f)
             iid_order = simulation_metadata['iid_order']
             color_df = read_in_igsr_samples(igsr_samples_filepath, bfile_path=f'{output_dir}/X')
         else:
             assert mode=='e', "only works with modes ps and e so far"
-            output_suffix = f'ps_0.5_e_{var}_afgrouping_{af_variance_grouping}'
-            with open(f"{output_dir}/simulation_metadata_{output_suffix}.pkl", "rb") as f:
+            output_file_suffix = get_output_file_suffix(ps=0.5,e=var,init=0,num_markers_assoc=2000) # choose first initialization and 2000 markers assoc for vis purposes
+            with open(f"{output_dir}/simulation_metadata_{output_file_suffix}.pkl", "rb") as f:
                 simulation_metadata = pickle.load(f)
             iid_order = simulation_metadata['iid_order']
             genetic_subgroups = simulation_metadata['genetic_subgroups']
@@ -243,7 +243,7 @@ def generate_umap_plot(mode, af_variance_grouping,var_list, color_col, color_lab
             genetic_subgroups_concat = genetic_subgroups.groupby('IID')['subgroup_value'].apply(clean_join).reset_index()
             genetic_subgroups_concat["IID"] = pd.Categorical(genetic_subgroups_concat["IID"], categories=iid_order, ordered=True)
             color_df = genetic_subgroups_concat.copy()
-        C = np.load(f'{output_dir}/C_{output_suffix}.npy')# pick e=0.5
+        C = np.load(f'{output_dir}/C_{output_file_suffix}.npy')# pick e=0.5
         C_scaled = StandardScaler().fit_transform(C) # standardize matrix before UMAP
 
         reducer = umap.UMAP()
@@ -270,27 +270,41 @@ def generate_umap_plot(mode, af_variance_grouping,var_list, color_col, color_lab
         + theme_minimal()
         + theme(figure_size=(8, 12),legend_title=element_text(size=9))
     )
-    p.save(f'{output_dir}/umap_clinical_{mode}_afgrouping_{af_variance_grouping}.pdf',dpi=300)
+    p.save(f'{output_dir}/umap_clinical_{mode}.pdf',dpi=300)
 
-def run_phenotypicsubgroup_gwas(output_dir,intermediate_file_dir,ps,e,af_variance_grouping,cov_included,phenotypic_subgroup):
+def run_phenotypicsubgroup_gwas(output_dir,output_file_suffix,intermediate_file_dir,ps,e,cov_included,phenotypic_subgroup):
+    '''
+    Runs plink GWAS and outputs to parquet file
+    '''
     # define specific file paths
     cov_file_suffix = '' if cov_included else '_NOPS'
-    output_suffix = f'ps_{ps}_e_{e}_afgrouping_{af_variance_grouping}'
 
     # write phenotype file
-    with open(f"{output_dir}/simulation_metadata_{output_suffix}.pkl", "rb") as f:
+    with open(f"{output_dir}/simulation_metadata_{output_file_suffix}.pkl", "rb") as f:
         simulation_metadata = pickle.load(f)
     phenotypic_subgroups = simulation_metadata['phenotypic_subgroups']
     pheno = phenotypic_subgroups[phenotypic_subgroups['phenotypic_subgroup']==phenotypic_subgroup][['IID','subgroup']].rename(columns={'subgroup':'Phenotype'})
     pheno['FID'] = pheno['IID']
     pheno['Phenotype'] = pheno['Phenotype'].astype(int)
-    pheno[['FID','IID','Phenotype']].set_index('FID').to_csv(f'{intermediate_file_dir}/PHENOTYPE_FILE_Subgroup{phenotypic_subgroup}_{output_suffix}')
+    pheno[['FID','IID','Phenotype']].set_index('FID').to_csv(f'{intermediate_file_dir}/PHENOTYPE_FILE_Subgroup{phenotypic_subgroup}_{output_file_suffix}')
 
     # run GWAS
-    result = subprocess.run(f'module unload plink && module load plink/2.0a5.13 && plink --bfile {output_dir}/X\
+    result = subprocess.run(f'module unload plink && module load plink/2.0a5.13 && plink --bfile {output_dir}/G\
                         --covar {intermediate_file_dir}/COVARIATE_FILE{cov_file_suffix} --covar-variance-standardize\
-                        --pheno {intermediate_file_dir}/PHENOTYPE_FILE_Subgroup{phenotypic_subgroup}_{output_suffix}\
+                        --pheno {intermediate_file_dir}/PHENOTYPE_FILE_Subgroup{phenotypic_subgroup}_{output_file_suffix}\
                         --glm omit-ref\
-                        --out {output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_suffix}_Geno_Cov_{cov_included}\
+                        --out {output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_{cov_included}\
                         --1 --no-pheno', shell=True, capture_output=True, text=True, executable='/bin/bash')
     result.check_returncode()
+
+    # write plink results to parquet for quicker analysis
+    with open(f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_{cov_included}.log','r') as f:
+        file = f.read()
+        assert "End time" in file, f"plink ended with errors for {output_file_suffix}"
+    plink_results = pd.read_csv(f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_{cov_included}.Phenotype.glm.logistic.hybrid',sep='\t')
+    assert plink_results[(plink_results['TEST']=='ADD')].shape[0] == 193634, f"not complete for {output_file_suffix}"
+    plink_results = plink_results[(plink_results['ERRCODE']=='.')&(plink_results['TEST']=='ADD')].copy() # only write SNP effect size data
+    plink_results.to_parquet(f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_{cov_included}_results.parquet', engine='pyarrow') # export to parquet format for quicker lookup later on
+    # clean up for storage space
+    os.remove(f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_{cov_included}.log')
+    os.remove(f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_{cov_included}.Phenotype.glm.logistic.hybrid')
