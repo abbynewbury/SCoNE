@@ -66,3 +66,8 @@ def profile_function(func, *args, mem_target='function', **kwargs):
         return (*result, max_mem, cpu_time, user_time)
     else:
         return result, max_mem, cpu_time, user_time
+    
+
+# Other helper functions
+def sigmoid(x):
+  return 1 / (1 + np.exp(-x))

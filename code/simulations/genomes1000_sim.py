@@ -304,6 +304,7 @@ def run_phenotypicsubgroup_gwas(output_dir,output_file_suffix,intermediate_file_
     plink_results = pd.read_csv(f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_{cov_included}.Phenotype.glm.logistic.hybrid',sep='\t')
     assert plink_results[(plink_results['TEST']=='ADD')].shape[0] == 193634, f"not complete for {output_file_suffix}"
     plink_results = plink_results[(plink_results['ERRCODE']=='.')&(plink_results['TEST']=='ADD')].copy() # only write SNP effect size data
+    plink_results["OR"] = pd.to_numeric(plink_results["OR"])
     plink_results.to_parquet(f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_{cov_included}_results.parquet', engine='pyarrow') # export to parquet format for quicker lookup later on
     # clean up for storage space
     os.remove(f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_{cov_included}.log')
