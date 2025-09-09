@@ -4,7 +4,7 @@
 #SBATCH --mem=50G
 #SBATCH --cpus-per-task=24
 #SBATCH --time=120:00:00
-#SBATCH --mail-type=FAIL
+#SBATCH --mail-type=ALL
 #SBATCH --mail-user=anewbury@nygenome.org
 #SBATCH --output=SimulateDataoutput.txt
 #SBATCH --error=SimulateDataerrors.txt
@@ -28,7 +28,8 @@ root_dir = '/gpfs/commons/datasets/1000genomes'
 output_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/output'
 igsr_samples_filepath = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/input/igsr_samples.tsv'
 maf_by_superpop_filepath = f'{intermediate_file_dir}/maf_by_superpop'
-admixture_filepath = f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.P'
+admixture_filepath = f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5'
+map_filepath = f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.map'
 code_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/code'
 # DEFINE PATHS
 
@@ -37,10 +38,10 @@ from simulations.genomes1000_sim import *
 
 
 # PARAMETERS
-generate_sim = False
+generate_sim = True
 evaluate_sim = True
 # generate all combinations of e and ps variables
-ps_list = [0.00, 0.25, 0.50, 0.75]
+ps_list = [True,False]
 e_list = [0.00, 0.25, 0.50, 0.75, 1]
 num_markers_assoc_list = [100,2000]
 init_list = range(100) # 100 random initializations for each combination
@@ -52,7 +53,7 @@ init_list = range(100) # 100 random initializations for each combination
 if generate_sim:
     # RUN FILE SETUP
     # generate genetic bfile (outputs to {output_dir}/G)
-    prep_1000genomes_bed_file(root_dir=root_dir, output=f'{output_dir}/G')
+    prep_1000genomes_bed_file(root_dir=root_dir, output=f'{output_dir}/G',subset_test=True) # if subset_test is true - only use 10k snps for faster processing
     #maf_by_superpop = calculate_maf_by_superpop(igsr_samples_filepath,intermediate_file_dir,bfile_path=f'{output_dir}/G',output=maf_by_superpop_filepath)
     # get pcs - for later gwas evaluation
     result = subprocess.run(f'module unload plink && module load flashpca && cd {output_dir} &&  flashpca --bfile {output_dir}/G --ndim 20', shell=True, capture_output=True, text=True, executable='/bin/bash')
@@ -63,6 +64,7 @@ if generate_sim:
     run_one = partial(
         sun_generate_sim_data,
         bfile_path=f'{output_dir}/G', af_df_filepath=admixture_filepath,
+        map_filepath = map_filepath,
         intermediate_file_dir=intermediate_file_dir,
         output_dir=output_dir,
         extra_subgroups_size=200,
@@ -97,7 +99,7 @@ if evaluate_sim:
     pcs = pd.read_csv(f'{output_dir}/pcs.txt',sep='\t')
     covar = pcs.merge(igsr_samples[['IID','Sex']], on='IID',how='inner')
     # probably cleaner way to do this
-    covar[['FID','IID']+[f'PC{i}' for i in range(1,11)]+['Sex']].set_index('FID').to_csv(f'{intermediate_file_dir}/COVARIATE_FILE')
+    covar[['FID','IID']+[f'PC{i}' for i in range(1,6)]+['Sex']].set_index('FID').to_csv(f'{intermediate_file_dir}/COVARIATE_FILE')
     covar[['FID','IID']+['Sex']].set_index('FID').to_csv(f'{intermediate_file_dir}/COVARIATE_FILE_NOPS')
 
     # run gwas phenotypic subgroup ~ genotypes + age + (pcs?)

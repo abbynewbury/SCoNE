@@ -8,12 +8,13 @@ import os
 import pickle
 from sklearn.preprocessing import StandardScaler
 
-def prep_1000genomes_bed_file(root_dir, output):
+def prep_1000genomes_bed_file(root_dir, output,subset_test=False):
     # change map and ped files to bed format
     # major allele set to A2 (If a binary fileset was originally loaded, --keep-allele-order forces the original A1/A2 allele encoding to be preserved; otherwise, the major allele is set to A2)
     plink_extract = f'''
     module load plink/1.9 && plink --file {root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05 \
         --make-bed \
+        {"--thin-count 10000" if subset_test else ""}\
         --out {output}
     '''
     result = subprocess.run(plink_extract, shell=True, check=True, executable="/bin/bash")
@@ -63,7 +64,7 @@ def read_in_igsr_samples(igsr_samples_filepath,bfile_path=None):
 def get_output_file_suffix(ps,e,init,num_markers_assoc):
     return f'ps_{ps}_e_{e}_init_{init}_markersassoc_{num_markers_assoc}'
 
-def sun_generate_sim_data(bfile_path, af_df_filepath,
+def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
                           intermediate_file_dir,intermediate_file_suffix,output_dir,output_file_suffix,
                           ps,num_markers_assoc,e,extra_subgroups_size,M,num_clinical_assoc):
     '''
@@ -72,7 +73,8 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,
 
     PARAMS:
     bfile_path: path to bfile for genetic data
-    af_df_filepath: pre-generated admixture fractions for K=5 (release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.P)
+    af_df_filepath: pre-generated admixture fractions for K=5 (release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5)
+    map_filepath: map file corresponding to admixture fraction file creation (release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.map)
     admixture_fractions_filepath: path
     intermediate_file_dir: dir to write intermediate files to (when using plink for example)
     intermediate_file_suffix: such that if multiple simulations are created, each is distinctly defined
@@ -99,23 +101,31 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,
     assert num_clinical_assoc<M, "num_clinical_assoc cannot exceed M"
 
     # 1. Read in allele frequencies per 5 admixture fractions to estimate af variance across groups
-    assert ps in [0.00, 0.25, 0.50, 0.75], f"{ps} is not a valid value for ps, must be one of the quartile values in [0.00, 0.25, 0.50, 0.75]" 
-    af_variance_df = pd.read_csv(af_df_filepath,header=None,sep='\s+')
-    af_variance_df['af_variance'] =  af_variance_df[range(5)].var(axis=1)
-    af_variance_df['af_var_quartile'] = (pd.qcut(af_variance_df['af_variance'], 4, labels=[0.00, 0.25, 0.50, 0.75]))
+    assert ps in [True,False], f"{ps} is not a valid value for ps, must be in [True,False]" 
+    af_variance_df = pd.read_csv(f'{af_df_filepath}.P',header=None,sep='\s+')
     # get marker id
-    bim_df = pd.read_csv(f'{bfile_path}.bim',sep='\s+',header=None)
-    bim_df.columns = ['CHR','SNP','CM','POS','A1','A2']
-    af_variance_df['SNP'] = bim_df['SNP'].values
+    df_map = pd.read_csv(map_filepath,sep='\s+',header=None,names=["chrom", "SNP", "cm", "bp"])
+    af_variance_df['SNP'] = df_map['SNP'].values
+    # make sure af variance df and bim df have same snps (incase of subsetting)
+    bim_df = pd.read_csv(f'{bfile_path}.bim',sep='\s+',header=None,names=['CHR','SNP','CM','POS','A1','A2'])
+    af_variance_df = af_variance_df.merge(bim_df[['SNP']], on='SNP', how='inner')
+    admixture_indiv_df = pd.read_csv(f'{af_df_filepath}.Q',header=None,sep='\s+')
 
+    X = af_variance_df.iloc[:, 0:5].to_numpy(float)      # N x 5
+    w = admixture_indiv_df.mean(axis=0).to_numpy(float)  # length 5
+    w = w / w.sum()
+    mu = X @ w                                           # (N,)
+    af_variance_df['af_variance_weighted'] = ((X - mu[:, None])**2 * w[None, :]).sum(axis=1)
+    af_variance_df['af_var_quartile'] = (pd.qcut(af_variance_df['af_variance_weighted'], 4, labels=[0.00, 0.25, 0.50, 0.75]))
+    af_variance_df['ps'] = af_variance_df['af_var_quartile'].map({0.00: False, 0.75: True})
 
     # 2. Generate genetic subgroups
     genetic_subgroups = []
     markers_assoc_dict = {} # names of the markers that are associated with each subgroup
     for genetic_subgroup in range(2):
         # Select SNP group based on num_markers_assoc and ps
-        assert af_variance_df[af_variance_df['af_var_quartile']==ps].shape[0]>num_markers_assoc, f"number of genetic features assoc. ({num_markers_assoc}) is too large, only {af_variance_df[af_variance_df['af_var_quartile']==ps].shape[0]} markers in quartile {ps} group"
-        markers_assoc = af_variance_df[af_variance_df['af_var_quartile']==ps].sample(n=num_markers_assoc, replace=False)['SNP'].values.tolist()
+        assert af_variance_df[af_variance_df['ps']==ps].shape[0]>num_markers_assoc, f"number of genetic features assoc. ({num_markers_assoc}) is too large, only {af_variance_df[af_variance_df['ps']==ps].shape[0]} markers in quartile {ps} group"
+        markers_assoc = af_variance_df[af_variance_df['ps']==ps].sample(n=num_markers_assoc, replace=False)['SNP'].values.tolist()
         markers_assoc_dict[genetic_subgroup] = markers_assoc
         assert len(set(markers_assoc))==len(markers_assoc) # make sure ped file has unique rows
 
@@ -158,7 +168,7 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,
         phenotypic_subgroup_df = genetic_subgroups[genetic_subgroups['genetic_subgroup']==phenotypic_subgroup][['IID','r']].copy()
         phenotypic_subgroup_df['phenotypic_subgroup'] = phenotypic_subgroup
         # corresponding genetic subgroup value for r
-        phenotypic_subgroup_df['subgroup'] = phenotypic_subgroup_df['r']*e + np.random.randn(len(phenotypic_subgroup_df)) > ((7.5/8)*phenotypic_subgroup_df['r'].quantile(0.8))*e
+        phenotypic_subgroup_df['subgroup'] = phenotypic_subgroup_df['r']*e + np.random.normal(loc=0,scale=0.1*phenotypic_subgroup_df['r'].std(),size=len(phenotypic_subgroup_df)) > (phenotypic_subgroup_df['r'].quantile(0.8))*e
         phenotypic_subgroups.append(phenotypic_subgroup_df)
     for phenotypic_subgroup in range(2,4):
         # randomly select extra_subgroups_size people
@@ -302,8 +312,7 @@ def run_phenotypicsubgroup_gwas(output_dir,output_file_suffix,intermediate_file_
         file = f.read()
         assert "End time" in file, f"plink ended with errors for {output_file_suffix}"
     plink_results = pd.read_csv(f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_{cov_included}.Phenotype.glm.logistic.hybrid',sep='\t')
-    assert plink_results[(plink_results['TEST']=='ADD')].shape[0] == 193634, f"not complete for {output_file_suffix}"
-    plink_results = plink_results[(plink_results['ERRCODE']=='.')&(plink_results['TEST']=='ADD')].copy() # only write SNP effect size data
+    plink_results = plink_results[plink_results['TEST']=='ADD'].copy() # only write SNP effect size data
     plink_results["OR"] = pd.to_numeric(plink_results["OR"])
     plink_results.to_parquet(f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_{cov_included}_results.parquet', engine='pyarrow') # export to parquet format for quicker lookup later on
     # clean up for storage space
