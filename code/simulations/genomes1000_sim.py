@@ -13,8 +13,8 @@ def prep_1000genomes_bed_file(root_dir, output,subset_test=False):
     # major allele set to A2 (If a binary fileset was originally loaded, --keep-allele-order forces the original A1/A2 allele encoding to be preserved; otherwise, the major allele is set to A2)
     plink_extract = f'''
     module load plink/1.9 && plink --file {root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05 \
+        {"--thin-count 10000 --seed 42" if subset_test else ""}\
         --make-bed \
-        {"--thin-count 10000" if subset_test else ""}\
         --out {output}
     '''
     result = subprocess.run(plink_extract, shell=True, check=True, executable="/bin/bash")
@@ -64,9 +64,12 @@ def read_in_igsr_samples(igsr_samples_filepath,bfile_path=None):
 def get_output_file_suffix(ps,e,init,num_markers_assoc):
     return f'ps_{ps}_e_{e}_init_{init}_markersassoc_{num_markers_assoc}'
 
+def rs(streams,stream_name):
+        return int(streams[stream_name].integers(1, 2**31 - 1))
+
 def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
                           intermediate_file_dir,intermediate_file_suffix,output_dir,output_file_suffix,
-                          ps,num_markers_assoc,e,extra_subgroups_size,M,num_clinical_assoc):
+                          ps,num_markers_assoc,e,extra_subgroups_size,M,num_clinical_assoc, run_seed):
     '''
     Generate synthetic data similar to Sun et al. (Multi-view biclustering for genotype-phenotype association studies of complex diseases)
     using 1000 Genomes Phase 3 data. Use admixture files which contain 193634 markers with MAF>5% and 2504 individuals. 
@@ -87,6 +90,7 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
     e: relative effect that genetic variation contributed to the effect of the phenotype. e in [0,1]. (decreased e means higher level of disagreement between genotypic and phenotypic subgroups)
     num_clinical_assoc: number of clinical features associated with subtype classification (same for all subtypes)
     extra_subgroups_size: number of people in s3 and s4 (selected at random)
+    run_seed: seed for run for reproducibility
 
     outputs:
     C: clinical data matrix (num samples x M)
@@ -99,6 +103,9 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
 
     '''
     assert num_clinical_assoc<M, "num_clinical_assoc cannot exceed M"
+    parent_ss = np.random.SeedSequence(run_seed)
+    names = ["markers", "noise", "extra_sub", "assoc", "poisson"]
+    streams = {name: np.random.default_rng(ss) for name, ss in zip(names, parent_ss.spawn(len(names)))}
 
     # 1. Read in allele frequencies per 5 admixture fractions to estimate af variance across groups
     assert ps in [True,False], f"{ps} is not a valid value for ps, must be in [True,False]" 
@@ -123,9 +130,9 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
     genetic_subgroups = []
     markers_assoc_dict = {} # names of the markers that are associated with each subgroup
     for genetic_subgroup in range(2):
-        # Select SNP group based on num_markers_assoc and ps
+        # Select SNP group based on num_markers_assoc and ps 
         assert af_variance_df[af_variance_df['ps']==ps].shape[0]>num_markers_assoc, f"number of genetic features assoc. ({num_markers_assoc}) is too large, only {af_variance_df[af_variance_df['ps']==ps].shape[0]} markers in quartile {ps} group"
-        markers_assoc = af_variance_df[af_variance_df['ps']==ps].sample(n=num_markers_assoc, replace=False)['SNP'].values.tolist()
+        markers_assoc = af_variance_df[af_variance_df['ps']==ps].sample(n=num_markers_assoc, replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist()
         markers_assoc_dict[genetic_subgroup] = markers_assoc
         assert len(set(markers_assoc))==len(markers_assoc) # make sure ped file has unique rows
 
@@ -164,15 +171,15 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
     fam_df.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
     iid_order = fam_df['IID'].values
     phenotypic_subgroups = []
-    for phenotypic_subgroup in range(2):
+    for phenotypic_subgroup in range(2): 
         phenotypic_subgroup_df = genetic_subgroups[genetic_subgroups['genetic_subgroup']==phenotypic_subgroup][['IID','r']].copy()
         phenotypic_subgroup_df['phenotypic_subgroup'] = phenotypic_subgroup
         # corresponding genetic subgroup value for r
-        phenotypic_subgroup_df['subgroup'] = phenotypic_subgroup_df['r']*e + np.random.normal(loc=0,scale=0.1*phenotypic_subgroup_df['r'].std(),size=len(phenotypic_subgroup_df)) > (phenotypic_subgroup_df['r'].quantile(0.8))*e
+        phenotypic_subgroup_df['subgroup'] = phenotypic_subgroup_df['r']*e + streams["noise"].normal(loc=0,scale=0.1*phenotypic_subgroup_df['r'].std(),size=len(phenotypic_subgroup_df)) > (phenotypic_subgroup_df['r'].quantile(0.8))*e
         phenotypic_subgroups.append(phenotypic_subgroup_df)
-    for phenotypic_subgroup in range(2,4):
+    for phenotypic_subgroup in range(2,4): 
         # randomly select extra_subgroups_size people
-        randomly_selected = pd.Series(iid_order).sample(extra_subgroups_size).values.tolist() 
+        randomly_selected = pd.Series(iid_order).sample(extra_subgroups_size,random_state=rs(streams,"extra_sub")).values.tolist() 
         phenotypic_subgroup_df = pd.DataFrame(iid_order,columns=['IID'])
         phenotypic_subgroup_df['r'] = None
         phenotypic_subgroup_df['phenotypic_subgroup'] = phenotypic_subgroup
@@ -182,12 +189,11 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
 
     # 4. simulate M binary clinical features
     # start with baseline probabiliyies
-    C = np.random.poisson(0.1,(len(iid_order), M)) # baseline prob of clinical feature is 0.1
+    C = streams["poisson"].poisson(0.1,(len(iid_order), M)) # baseline prob of clinical feature is 0.1 
     clinical_assoc_df_rows = [] # index of clinical vars that are associated (and their strength)
     for phenotypic_subgroup in range(4):
         # index of randomly chosen, associated clinical variables 
-        assoc_idx = np.random.choice(M, size=num_clinical_assoc, replace=False) 
-        np.random.shuffle(assoc_idx)       
+        assoc_idx = streams["assoc"].choice(M, size=num_clinical_assoc, replace=False)  
         n1 = num_clinical_assoc // 3 # 1/3 who get P 0.6
         n2 = 2 * num_clinical_assoc // 3 # 1/3 who get P 0.5
         # get those who are in the subgroup
@@ -195,9 +201,9 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
         subj_ids = phenotypic_subgroups.loc[mask, "IID"].unique()
         # map subject IDs to row indices 
         row_idx = [i for i, iid in enumerate(iid_order) if iid in subj_ids]
-        C[np.ix_(row_idx, assoc_idx[:n1])] = np.random.poisson(1, size=(len(row_idx), n1))
-        C[np.ix_(row_idx, assoc_idx[n1:n2])] = np.random.poisson(0.75, size=(len(row_idx), n2-n1))
-        C[np.ix_(row_idx, assoc_idx[n2:])] = np.random.poisson(0.5, size=(len(row_idx), len(assoc_idx)-n2))
+        C[np.ix_(row_idx, assoc_idx[:n1])] = streams["poisson"].poisson(1, size=(len(row_idx), n1))
+        C[np.ix_(row_idx, assoc_idx[n1:n2])] = streams["poisson"].poisson(0.75, size=(len(row_idx), n2-n1))
+        C[np.ix_(row_idx, assoc_idx[n2:])] = streams["poisson"].poisson(0.5, size=(len(row_idx), len(assoc_idx)-n2))
         clinical_assoc_df_rows += [
         {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.6, "indices": assoc_idx[:n1]},
         {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.5, "indices": assoc_idx[n1:n2]},
@@ -214,15 +220,17 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
     "genetic_subgroups": genetic_subgroups,          # list/array/Series
     "phenotypic_subgroups": phenotypic_subgroups,    # list/array/Series
     "markers_assoc": markers_assoc_dict,             # dict: gen_subgroup -> [marker_id, ...]
-    "clinical_assoc": clinical_assoc_df              # pandas DataFrame
+    "clinical_assoc": clinical_assoc_df,              # pandas DataFrame
+    "run_seed": run_seed                             # int
     }
     with open(f"{output_dir}/simulation_metadata_{output_file_suffix}.pkl", "wb") as f:
         pickle.dump(bundle, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     return genetic_subgroups, phenotypic_subgroups, C, iid_order, markers_assoc_dict, clinical_assoc_df 
 
+### FUNCTIONS FOR DATA SIM EVALUATION:
 
-# Functions for data simulation evaluation
+# UMAP RELATED
 def clean_join(values):
     # remove empty strings
     vals = sorted(set(v for v in values if v != ''), key=lambda x: int(x))
@@ -241,10 +249,10 @@ def generate_umap_plot(mode, var_list, color_col, color_label, output_dir, igsr_
             with open(f"{output_dir}/simulation_metadata_{output_file_suffix}.pkl", "rb") as f:
                 simulation_metadata = pickle.load(f)
             iid_order = simulation_metadata['iid_order']
-            color_df = read_in_igsr_samples(igsr_samples_filepath, bfile_path=f'{output_dir}/X')
+            color_df = read_in_igsr_samples(igsr_samples_filepath, bfile_path=f'{output_dir}/G')
         else:
             assert mode=='e', "only works with modes ps and e so far"
-            output_file_suffix = get_output_file_suffix(ps=0.5,e=var,init=0,num_markers_assoc=2000) # choose first initialization and 2000 markers assoc for vis purposes
+            output_file_suffix = get_output_file_suffix(ps=False,e=var,init=0,num_markers_assoc=2000) # choose first initialization and 2000 markers assoc for vis purposes
             with open(f"{output_dir}/simulation_metadata_{output_file_suffix}.pkl", "rb") as f:
                 simulation_metadata = pickle.load(f)
             iid_order = simulation_metadata['iid_order']
@@ -278,11 +286,13 @@ def generate_umap_plot(mode, var_list, color_col, color_label, output_dir, igsr_
         + labs(title=title, color=color_label)
         + facet_wrap(f'~{mode}',ncol=2,scales='free')
         + theme_minimal()
-        + theme(figure_size=(8, 12),legend_title=element_text(size=9))
+        + theme(legend_title=element_text(size=9))
     )
     p.save(f'{output_dir}/umap_clinical_{mode}.pdf',dpi=300)
 
-def run_phenotypicsubgroup_gwas(output_dir,output_file_suffix,intermediate_file_dir,ps,e,cov_included,phenotypic_subgroup):
+# GWAS RELATED
+
+def run_phenotypicsubgroup_gwas(output_dir,output_file_suffix,intermediate_file_dir,cov_included,phenotypic_subgroup):
     '''
     Runs plink GWAS and outputs to parquet file
     '''
@@ -318,3 +328,76 @@ def run_phenotypicsubgroup_gwas(output_dir,output_file_suffix,intermediate_file_
     # clean up for storage space
     os.remove(f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_{cov_included}.log')
     os.remove(f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_{cov_included}.Phenotype.glm.logistic.hybrid')
+
+# gwas evaluation
+
+def counts_from_bool(true_arr, pred_arr):
+    tp = np.count_nonzero(pred_arr & true_arr)
+    tn = np.count_nonzero(~pred_arr & ~true_arr)
+    fp = np.count_nonzero(pred_arr & ~true_arr)
+    fn = np.count_nonzero(~pred_arr & true_arr)
+    return tn, fp, fn, tp
+
+def metrics_from_counts(tn, fp, fn, tp):
+    n = tn + fp + fn + tp
+    acc  = (tp + tn) / n 
+    prec = tp / (tp + fp) if (tp+fp)>0 else np.nan
+    rec  = tp / (tp + fn) if (tp+fn)>0 else np.nan
+    f1   = 2 * prec * rec / (prec + rec) if (prec + rec)>0 else np.nan
+    spec = tn / (tn + fp) if (tn + fp)>0 else np.nan
+    return acc, prec, rec, f1, spec
+
+def evaluate_gwas(output_dir,ps, e, init, num_markers_assoc, phenotypic_subgroup,sig_level=5e-8):
+    output_file_suffix = sim_functions.get_output_file_suffix(ps, e, init, num_markers_assoc)
+    meta_path = f"{output_dir}/simulation_metadata_{output_file_suffix}.pkl"
+
+    with open(meta_path, "rb") as f:
+        simulation_metadata = pickle.load(f)
+
+
+    # read both covariate and no-covariate files once
+    df_with = (pd.read_parquet(
+        f"{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_True_results.parquet")
+        .rename(columns={"OR": "OR_with_pcs", "P": "P_with_pcs","LOG(OR)_SE":"LOG(OR)_SE_with_pcs"}))
+    
+    df_with = df_with[(df_with['ERRCODE']=='.')].copy() 
+
+    df_nopcs = (pd.read_parquet(
+        f"{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_False_results.parquet")
+        .rename(columns={"OR": "OR_no_pcs", "P": "P_no_pcs","LOG(OR)_SE":"LOG(OR)_SE_no_pcs"}))
+    df_nopcs = df_nopcs[(df_nopcs['ERRCODE']=='.')].copy() # badly behaved SNP, can remove with HWE filtering (check though)
+
+    wide = df_nopcs.merge(df_with, on="ID", how="inner")
+    
+    associated_markers = set(simulation_metadata["markers_assoc"][phenotypic_subgroup]) if phenotypic_subgroup in range(2) else set()
+    y_true = wide["ID"].isin(associated_markers).to_numpy() # true associations
+
+    yhat_no = (wide["P_no_pcs"].to_numpy() < sig_level) # predicted associations no PCs
+    yhat_with = (wide["P_with_pcs"].to_numpy() < sig_level) # predicted associations with PCs
+
+    tn0, fp0, fn0, tp0 = counts_from_bool(y_true, yhat_no) # tn, ... without PCs
+    tn1, fp1, fn1, tp1 = counts_from_bool(y_true, yhat_with) # tn,... with PCs
+
+    acc0, prec0, rec0, f10, spec0 = metrics_from_counts(tn0, fp0, fn0, tp0) # without PCs
+    acc1, prec1, rec1, f11, spec1 = metrics_from_counts(tn1, fp1, fn1, tp1) # with PCs
+
+    
+    rel_change = (wide["OR_with_pcs"] - wide["OR_no_pcs"]) / wide["OR_no_pcs"]
+    prop_changed = (rel_change.abs() > 0.10).mean() # proportion where OR changes +- 10% in presence of pcs
+    rel_change_associated = (wide.loc[y_true]["OR_with_pcs"] - wide.loc[y_true]["OR_no_pcs"]) / wide.loc[y_true]["OR_no_pcs"]
+    prop_changed_associated = (rel_change_associated.abs() > 0.10).mean() # proportion where OR changes +- 10% in presence of pcs
+    avg_or_associated_with_pcs = (wide.loc[y_true]["OR_with_pcs"]).mean()
+    avg_or_associated_no_pcs = (wide.loc[y_true]["OR_no_pcs"]).mean()
+    avg_se_associated_with_pcs = (wide.loc[y_true]["LOG(OR)_SE_with_pcs"]).mean()
+    avg_se_associated_no_pcs = (wide.loc[y_true]["LOG(OR)_SE_no_pcs"]).mean()
+
+    return dict(
+        ps=ps, e=e, init=init, num_markers_assoc=num_markers_assoc, phenotypic_subgroup=phenotypic_subgroup,
+        tn_no_pcs=tn0, fp_no_pcs=fp0, fn_no_pcs=fn0, tp_no_pcs=tp0,
+        tn_with_pcs=tn1, fp_with_pcs=fp1, fn_with_pcs=fn1, tp_with_pcs=tp1,
+        acc_no_pcs=acc0,  prec_no_pcs=prec0,  rec_no_pcs=rec0,  f1_no_pcs=f10, spec_no_pcs=spec0,
+        acc_with_pcs=acc1, prec_with_pcs=prec1, rec_with_pcs=rec1, f1_with_pcs=f11, spec_with_pcs=spec1,
+        prop_changed=prop_changed, prop_changed_associated=prop_changed_associated, 
+        avg_or_associated_with_pcs=avg_or_associated_with_pcs, avg_or_associated_no_pcs=avg_or_associated_no_pcs,
+        avg_se_associated_with_pcs=avg_se_associated_with_pcs,avg_se_associated_no_pcs=avg_se_associated_no_pcs
+    )

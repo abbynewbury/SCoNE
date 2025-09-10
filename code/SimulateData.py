@@ -40,6 +40,7 @@ from simulations.genomes1000_sim import *
 # PARAMETERS
 generate_sim = True
 evaluate_sim = True
+run_gwas = True # only will run if run_gwas=True AND evaluate_sim=True
 # generate all combinations of e and ps variables
 ps_list = [True,False]
 e_list = [0.00, 0.25, 0.50, 0.75, 1]
@@ -58,8 +59,10 @@ if generate_sim:
     # get pcs - for later gwas evaluation
     result = subprocess.run(f'module unload plink && module load flashpca && cd {output_dir} &&  flashpca --bfile {output_dir}/G --ndim 20', shell=True, capture_output=True, text=True, executable='/bin/bash')
     # RUN FILE SETUP
-
-
+    
+    combos = list(product(ps_list, e_list, init_list, num_markers_assoc_list))
+    child_ss = np.random.SeedSequence().spawn(len(combos)) 
+    run_seeds = [int(np.random.default_rng(ss).integers(1, 2**31 - 1)) for ss in child_ss] # for reproducible randomness
     # run with 2000 or 100 associated markers, 100 random initializations each
     run_one = partial(
         sun_generate_sim_data,
@@ -74,8 +77,9 @@ if generate_sim:
 
     results = Parallel(n_jobs=-1)(
         delayed(run_one)(
-            ps=ps, e=e, num_markers_assoc=num_markers_assoc, intermediate_file_suffix=get_output_file_suffix(ps,e,init,num_markers_assoc), output_file_suffix=get_output_file_suffix(ps,e,init,num_markers_assoc)) 
-            for ps, e, init, num_markers_assoc in product(ps_list, e_list, init_list, num_markers_assoc_list)
+            ps=ps, e=e, num_markers_assoc=num_markers_assoc, intermediate_file_suffix=get_output_file_suffix(ps,e,init,num_markers_assoc),
+              output_file_suffix=get_output_file_suffix(ps,e,init,num_markers_assoc),run_seed=run_seeds[i]) 
+            for i, (ps, e, init, num_markers_assoc) in enumerate(combos)
         )
 
 
@@ -83,34 +87,48 @@ if generate_sim:
 
 if evaluate_sim:
 # VISUAL EVALUATION (UMAP)
-    # # For ps
-    # generate_umap_plot(mode='ps', var_list=ps_list, color_col='Superpopulation code', 
-    #                         color_label='Superpopulation', output_dir=output_dir,igsr_samples_filepath=igsr_samples_filepath)
+    # For ps
+    generate_umap_plot(mode='ps', var_list=ps_list, color_col='Superpopulation code', 
+                            color_label='Superpopulation', output_dir=output_dir,igsr_samples_filepath=igsr_samples_filepath)
 
-    # # For e
-    # generate_umap_plot(mode='e', var_list=e_list, color_col='subgroup_value', 
-    #                         color_label='Genetic Subgroup', output_dir=output_dir)
+    # For e
+    generate_umap_plot(mode='e', var_list=e_list, color_col='subgroup_value', 
+                            color_label='Genetic Subgroup', output_dir=output_dir)
 
 
 # QUANTITATIVE EVALUATION (GWAS)
+    if run_gwas:
+        # write to covariate file
+        igsr_samples = read_in_igsr_samples(igsr_samples_filepath, bfile_path=f'{output_dir}/G')
+        pcs = pd.read_csv(f'{output_dir}/pcs.txt',sep='\t')
+        covar = pcs.merge(igsr_samples[['IID','Sex']], on='IID',how='inner')
+        # probably cleaner way to do this
+        covar[['FID','IID']+[f'PC{i}' for i in range(1,11)]+['Sex']].set_index('FID').to_csv(f'{intermediate_file_dir}/COVARIATE_FILE')
+        covar[['FID','IID']+['Sex']].set_index('FID').to_csv(f'{intermediate_file_dir}/COVARIATE_FILE_NOPS')
 
-    # write to covariate file
-    igsr_samples = read_in_igsr_samples(igsr_samples_filepath, bfile_path=f'{output_dir}/G')
-    pcs = pd.read_csv(f'{output_dir}/pcs.txt',sep='\t')
-    covar = pcs.merge(igsr_samples[['IID','Sex']], on='IID',how='inner')
-    # probably cleaner way to do this
-    covar[['FID','IID']+[f'PC{i}' for i in range(1,6)]+['Sex']].set_index('FID').to_csv(f'{intermediate_file_dir}/COVARIATE_FILE')
-    covar[['FID','IID']+['Sex']].set_index('FID').to_csv(f'{intermediate_file_dir}/COVARIATE_FILE_NOPS')
+        # run gwas phenotypic subgroup ~ genotypes + age + (pcs?)
+        run_one = partial(
+        run_phenotypicsubgroup_gwas,
+        intermediate_file_dir=intermediate_file_dir,
+        output_dir=output_dir
+        )
 
-    # run gwas phenotypic subgroup ~ genotypes + age + (pcs?)
-    run_one = partial(
-    run_phenotypicsubgroup_gwas,
-    intermediate_file_dir=intermediate_file_dir,
-    output_dir=output_dir
+        results = Parallel(n_jobs=-1)(
+            delayed(run_one)(
+                output_file_suffix=get_output_file_suffix(ps,e,init,num_markers_assoc), cov_included=cov_included, phenotypic_subgroup=phenotypic_subgroup) 
+                for ps, e, init, num_markers_assoc, cov_included, phenotypic_subgroup  in product(ps_list, [0.50,1], init_list, num_markers_assoc_list, [True,False],range(4))
+            )
+        
+    # make plots evaluating GWAS
+    combos = list(product(ps_list, [0.50,1], init_list, num_markers_assoc_list, range(4)))
+    rows = Parallel(n_jobs=-1)(
+        delayed(evaluate_gwas)(
+            output_dir=output_dir,
+            ps=ps, e=e, init=init, num_markers_assoc=num_markers_assoc, 
+            phenotypic_subgroup=phenotypic_subgroup, sig_level=5e-8
+        )
+        for (ps, e, init, num_markers_assoc, phenotypic_subgroup) in combos
     )
 
-    results = Parallel(n_jobs=-1)(
-        delayed(run_one)(
-            output_file_suffix=get_output_file_suffix(ps,e,init,num_markers_assoc),ps=ps, e=e, cov_included=cov_included, phenotypic_subgroup=phenotypic_subgroup) 
-            for ps, e, init, num_markers_assoc, cov_included, phenotypic_subgroup  in product(ps_list, [0.50], init_list, num_markers_assoc_list, [True,False],range(4))
-        )
+    results_df = pd.DataFrame(rows)
+    
