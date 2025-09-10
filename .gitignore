@@ -1,5 +1,6 @@
 # Ignore all files in the 'code' subfolder, except .py
 *.*
+data/*
 !*.py
 !.gitignore
 !readme.md
