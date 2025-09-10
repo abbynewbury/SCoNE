@@ -5,8 +5,24 @@ import numpy as np
 import umap
 from plotnine import *
 import os
+import glob
 import pickle
 from sklearn.preprocessing import StandardScaler
+
+def get_genetic_pcs(map_ped_filepath,output_dir,ndim=20):
+    # make map/ped file into bfile
+    plink_extract = f'''
+    module load plink/1.9 && plink --file {map_ped_filepath} \
+        --make-bed \
+        --out {output_dir}/full_bfile
+    '''
+    result = subprocess.run(plink_extract, shell=True, check=True, executable="/bin/bash")
+
+    result = subprocess.run(f'''module unload plink && module load flashpca\
+                             && cd {output_dir} &&  flashpca --bfile {output_dir}/G --ndim {ndim}''', shell=True, capture_output=True, text=True, executable='/bin/bash')
+
+    for f in glob.iglob(f"{output_dir}/full_bfile*"): # clean up
+        os.remove(f)
 
 def prep_1000genomes_bed_file(root_dir, output,subset_test=False):
     # change map and ped files to bed format
@@ -19,7 +35,7 @@ def prep_1000genomes_bed_file(root_dir, output,subset_test=False):
     '''
     result = subprocess.run(plink_extract, shell=True, check=True, executable="/bin/bash")
 
-    # make .raw file for X matrix later
+    # make .raw file for G matrix later
     plink_extract = f'''
     module load plink/1.9 && plink --bfile {output} \
         --recode A \
@@ -44,22 +60,6 @@ def read_in_igsr_samples(igsr_samples_filepath,bfile_path=None):
 
     return igsr_samples
 
-# def calculate_maf_by_superpop(igsr_samples_filepath,intermediate_file_dir,bfile_path,output):
-#       # Calculate allele frequencies in five superpopulations
-#       # generate superpopulation cluster file
-#       igsr_samples = read_in_igsr_samples(igsr_samples_filepath,bfile_path)
-#       igsr_samples[['FID','IID','Superpopulation code']].to_csv(f'{intermediate_file_dir}/superpop.clst',index=False,header=False,sep='\t')
-#       # calculate maf by superpop
-#       plink_freq = f''' module load plink/1.9 && 
-#       plink --bfile {bfile_path} \
-#             --freq \
-#             --within {intermediate_file_dir}/superpop.clst \
-#             --out {output}
-#       '''
-#       result = subprocess.run(plink_freq, shell=True, check=True, executable="/bin/bash")
-
-#       maf_by_superpop = pd.read_csv(f'{intermediate_file_dir}/maf_by_superpop.frq.strat',sep='\s+')
-#       return maf_by_superpop
 
 def get_output_file_suffix(ps,e,init,num_markers_assoc):
     return f'ps_{ps}_e_{e}_init_{init}_markersassoc_{num_markers_assoc}'
@@ -294,7 +294,7 @@ def generate_umap_plot(mode, var_list, color_col, color_label, output_dir, igsr_
 
 def run_phenotypicsubgroup_gwas(output_dir,output_file_suffix,intermediate_file_dir,cov_included,phenotypic_subgroup):
     '''
-    Runs plink GWAS and outputs to parquet file
+    Runs PLINK and SAIGE GWAS and outputs to parquet file
     '''
     # define specific file paths
     cov_file_suffix = '' if cov_included else '_NOPS'
