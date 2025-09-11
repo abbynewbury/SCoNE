@@ -335,7 +335,7 @@ def run_plink_gwas(bfile, covariate_file, phenotype_file, out):
         file = f.read()
         assert "End time" in file, f"plink ended with errors for {out}"
     plink_results = pd.read_csv(f'{out}.Phenotype.glm.logistic.hybrid',sep='\t')
-    plink_results = plink_results[plink_results['TEST']=='ADD'].copy() # only write SNP effect size data
+    plink_results = plink_results[(plink_results['TEST']=='ADD')&(plink_results['ERRCODE']=='.')].copy() # only write SNP effect size data
     plink_results["OR"] = pd.to_numeric(plink_results["OR"])
     plink_results.to_parquet(f'{out}.parquet', engine='pyarrow') # export to parquet format for quicker lookup later on
     # clean up for storage space
@@ -373,10 +373,19 @@ def run_step1(plinkFile, phenoFile, out):
                             --IsOverwriteVarianceRatioFile=TRUE", shell=True, capture_output=True, text=True, executable='/bin/bash')
     result.check_returncode()
 
+def active_count(job_ids):
+    if not job_ids: return 0
+    cmd = f"squeue -h -j {','.join(job_ids)}"
+    r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    # count non-empty lines
+    return sum(1 for line in r.stdout.splitlines() if line.strip())
+
 def submit_step2_job(bfile, GMMATmodelFile, varianceRatioFile, intermediate_saige_dir, out):
     # run association tests LOCO
     job_ids = []
     for chr in range(1,23):
+        while active_count(job_ids) >= 5:
+            time.sleep(30)
         job_name = f"{os.path.basename(out)}_chr_{chr}"
         slurm_script = f'{intermediate_saige_dir}/{job_name}.sh'
         slurm_content = f"""#!/bin/bash
@@ -412,13 +421,7 @@ Rscript $(echo $CMAKE_PREFIX_PATH | tr ':' '\n' | grep R/4.3.3)/SAIGE/extdata/st
         job_ids.append(job_id)
     
     # wait for all jobs to complete
-    while True:
-        result = subprocess.run(
-            f"squeue -h -j {','.join(job_ids)}",
-            shell=True, capture_output=True, text=True
-        )
-        if result.stdout.strip() == "":  # no jobs left
-            break
+    while active_count(job_ids) > 0:
         time.sleep(30)
 
     # consolidate saige results

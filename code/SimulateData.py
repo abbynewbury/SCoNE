@@ -118,7 +118,7 @@ if evaluate_sim:
         output_dir=output_dir
         )
 
-        results = Parallel(n_jobs=-1)(
+        results = Parallel(n_jobs=24)(
             delayed(run_one)(
                 output_file_suffix=get_output_file_suffix(ps,e,init,num_markers_assoc), phenotypic_subgroup=phenotypic_subgroup) 
                 for ps, e, init, num_markers_assoc,  phenotypic_subgroup  in product(ps_list, [0.50,1], init_list, num_markers_assoc_list,range(4))

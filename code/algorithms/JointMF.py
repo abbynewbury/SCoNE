@@ -12,7 +12,7 @@ def total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C)
     G_hat = np.clip(G_hat, 1e-7, 1 - 1e-7)
     C_hat = W@H_C.T + Z@U_C.T
     # clipping for log purposes
-    C_hat = np.clip(C_hat, 1e-7, 1 - 1e-7)
+    C_hat = np.clip(C_hat, 1e-7, np.inf)
 
     E_g = np.ones(G.shape)
 
@@ -29,6 +29,8 @@ def total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C)
 
 # Per-block factories (compute precomputes once per inner solve)
 
+# Per-block factories (compute precomputes once per inner solve)
+
 def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C):
     # Precompute terms independent of W
     U1 = Z@U_G.T
@@ -42,7 +44,7 @@ def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambd
         # clipping for log purposes
         G_hat = np.clip(sigmoid(W@H_G.T + U1), 1e-7, 1 - 1e-7)
         # clipping for log purposes
-        C_hat = np.clip(W@H_C.T + U2, 1e-7, 1 - 1e-7)
+        C_hat = np.clip(W@H_C.T + U2, 1e-7, np.inf)
         bce_loss = np.sum(-np.multiply(G,np.log(G_hat)) - np.multiply(E_g-G,np.log(E_g-G_hat)))
         kl_div_loss = np.sum(-np.multiply(C,np.log(C_hat)) + C_hat) + C_const # log(C!) can help stabilize
         f = bce_loss + kl_div_loss + lambda_W/2* np.trace(W.T @ W) + reg 
@@ -52,7 +54,7 @@ def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambd
         # clipping for log purposes
         G_hat = np.clip(sigmoid(W@H_G.T + U1), 1e-7, 1 - 1e-7)
         # clipping for log purposes
-        C_hat = np.clip(W@H_C.T + U2, 1e-7, 1 - 1e-7)
+        C_hat = np.clip(W@H_C.T + U2, 1e-7, np.inf)
 
         G_tilde = np.divide(G,G_hat)
         G_bar = np.divide(E_g-G,E_g-G_hat)
@@ -66,7 +68,7 @@ def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambd
 def make_fg_HG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C):
     # Precompute terms independent of H_G
     U1 = Z@U_G.T
-    C_hat = np.clip(W@H_C.T + Z@U_C.T, 1e-7, 1 - 1e-7)
+    C_hat = np.clip(W@H_C.T + Z@U_C.T, 1e-7, np.inf)
     kl_div_loss = np.sum(-np.multiply(C,np.log(C_hat)) + C_hat + gammaln(C + 1)) # log(C!) can help stabilize
     E_g = np.ones(G.shape)
     reg = lambda_W/2* np.trace(W.T @ W) +  lambda_H_C/2* np.trace(H_C.T @ H_C)
@@ -100,13 +102,13 @@ def make_fg_HC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lamb
     reg = lambda_W/2* np.trace(W.T @ W) +  lambda_H_G/2* np.trace(H_G.T @ H_G)
     def fun(x):
         H_C = x.reshape(shape, order='F')
-        C_hat = np.clip(W@H_C.T + U1, 1e-7, 1 - 1e-7)
+        C_hat = np.clip(W@H_C.T + U1, 1e-7, np.inf)
         kl_div_loss = np.sum(-np.multiply(C,np.log(C_hat)) + C_hat) + C_const # log(C!) can help stabilize
         f = bce_loss + kl_div_loss + reg +  lambda_H_C/2* np.trace(H_C.T @ H_C)
         return f
     def jac(x):
         H_C = x.reshape(shape, order='F')
-        C_hat = np.clip(W@H_C.T + U1, 1e-7, 1 - 1e-7)
+        C_hat = np.clip(W@H_C.T + U1, 1e-7, np.inf)
 
         C_tilde = np.divide(C,C_hat)
 
@@ -117,7 +119,7 @@ def make_fg_HC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lamb
 def make_fg_UG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C):
     # Precompute terms independent of U_G
     U1 = W@H_G.T
-    C_hat = np.clip(W@H_C.T + Z@U_C.T, 1e-7, 1 - 1e-7)
+    C_hat = np.clip(W@H_C.T + Z@U_C.T, 1e-7, np.inf)
     kl_div_loss = np.sum(-np.multiply(C,np.log(C_hat)) + C_hat + gammaln(C + 1)) # log(C!) can help stabilize
     E_g = np.ones(G.shape)
     regularization = lambda_W/2* np.trace(W.T @ W) +  lambda_H_G/2* np.trace(H_G.T @ H_G) +  lambda_H_C/2* np.trace(H_C.T @ H_C)
@@ -151,13 +153,13 @@ def make_fg_UC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lamb
     regularization = lambda_W/2* np.trace(W.T @ W) +  lambda_H_G/2* np.trace(H_G.T @ H_G) +  lambda_H_C/2* np.trace(H_C.T @ H_C)
     def fun(x):
         U_C = x.reshape(shape, order='F')
-        C_hat = np.clip(U1 + Z@U_C.T, 1e-7, 1 - 1e-7)
+        C_hat = np.clip(U1 + Z@U_C.T, 1e-7, np.inf)
         kl_div_loss = np.sum(-np.multiply(C,np.log(C_hat)) + C_hat) + C_const
         f = bce_loss + kl_div_loss + regularization
         return f
     def jac(x):
         U_C = x.reshape(shape, order='F')
-        C_hat = np.clip(U1 + Z@U_C.T, 1e-7, 1 - 1e-7)
+        C_hat = np.clip(U1 + Z@U_C.T, 1e-7, np.inf)
 
         C_tilde = np.divide(C,C_hat)
 
