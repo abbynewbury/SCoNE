@@ -7,6 +7,7 @@ from plotnine import *
 import os
 import glob
 import pickle
+import time
 from sklearn.preprocessing import StandardScaler
 
 def get_genetic_pcs(map_ped_filepath,output_dir,ndim=20):
@@ -292,112 +293,238 @@ def generate_umap_plot(mode, var_list, color_col, color_label, output_dir, igsr_
 
 # GWAS RELATED
 
-def run_phenotypicsubgroup_gwas(output_dir,output_file_suffix,intermediate_file_dir,cov_included,phenotypic_subgroup):
-    '''
-    Runs PLINK and SAIGE GWAS and outputs to parquet file
-    '''
-    # define specific file paths
-    cov_file_suffix = '' if cov_included else '_NOPS'
-
-    # write phenotype file
-    with open(f"{output_dir}/simulation_metadata_{output_file_suffix}.pkl", "rb") as f:
+# gwas setup
+def generate_phenotype_file(simulation_metadata_path, phenotypic_subgroup, covar_filepath, phenotype_file_plink, phenotype_file_saige):
+    # write plink phenotype file
+    with open(simulation_metadata_path, "rb") as f:
         simulation_metadata = pickle.load(f)
     phenotypic_subgroups = simulation_metadata['phenotypic_subgroups']
+
+    # write plink phenotype file
     pheno = phenotypic_subgroups[phenotypic_subgroups['phenotypic_subgroup']==phenotypic_subgroup][['IID','subgroup']].rename(columns={'subgroup':'Phenotype'})
     pheno['FID'] = pheno['IID']
     pheno['Phenotype'] = pheno['Phenotype'].astype(int)
-    pheno[['FID','IID','Phenotype']].set_index('FID').to_csv(f'{intermediate_file_dir}/PHENOTYPE_FILE_Subgroup{phenotypic_subgroup}_{output_file_suffix}')
+    pheno[['FID','IID','Phenotype']].set_index('FID').to_csv(phenotype_file_plink)
 
-    # run GWAS
-    result = subprocess.run(f'module unload plink && module load plink/2.0a5.13 && plink --bfile {output_dir}/G\
-                        --covar {intermediate_file_dir}/COVARIATE_FILE{cov_file_suffix} --covar-variance-standardize\
-                        --pheno {intermediate_file_dir}/PHENOTYPE_FILE_Subgroup{phenotypic_subgroup}_{output_file_suffix}\
-                        --glm omit-ref\
-                        --out {output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_{cov_included}\
+    # write saige phenotype file (this includes covariates)
+    pheno.drop('FID',axis=1,inplace=True)
+    covar_df = pd.read_csv(covar_filepath).drop('FID',axis=1)
+    saige_phenoFile = pheno.merge(covar_df,how='inner',on='IID').set_index('IID')
+    assert (set(saige_phenoFile.index) == set(pheno['IID'])) and (set(pheno['IID'])==set(covar_df['IID']))
+    saige_phenoFile.to_csv(phenotype_file_saige,sep='\t')
+
+# plink gwas
+
+def run_plink_gwas(bfile, covariate_file, phenotype_file, out):
+    if covariate_file is None:
+        covar_section = ''
+        covar_flag = 'allow-no-covars'
+    else:
+        covar_section = f'--covar {covariate_file} --covar-variance-standardize'
+        covar_flag = ''
+    result = subprocess.run(f'module unload plink && module load plink/2.0a5.13 && plink --bfile {bfile}\
+                        {covar_section}\
+                        --pheno {phenotype_file}\
+                        --glm omit-ref {covar_flag}\
+                        --out {out}\
                         --1 --no-pheno', shell=True, capture_output=True, text=True, executable='/bin/bash')
     result.check_returncode()
 
-    # write plink results to parquet for quicker analysis
-    with open(f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_{cov_included}.log','r') as f:
+    # write plink results to parquet for quicker analysis - write all results to plink
+    with open(f'{out}.log','r') as f:
         file = f.read()
-        assert "End time" in file, f"plink ended with errors for {output_file_suffix}"
-    plink_results = pd.read_csv(f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_{cov_included}.Phenotype.glm.logistic.hybrid',sep='\t')
+        assert "End time" in file, f"plink ended with errors for {out}"
+    plink_results = pd.read_csv(f'{out}.Phenotype.glm.logistic.hybrid',sep='\t')
     plink_results = plink_results[plink_results['TEST']=='ADD'].copy() # only write SNP effect size data
     plink_results["OR"] = pd.to_numeric(plink_results["OR"])
-    plink_results.to_parquet(f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_{cov_included}_results.parquet', engine='pyarrow') # export to parquet format for quicker lookup later on
+    plink_results.to_parquet(f'{out}.parquet', engine='pyarrow') # export to parquet format for quicker lookup later on
     # clean up for storage space
-    os.remove(f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_{cov_included}.log')
-    os.remove(f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_{cov_included}.Phenotype.glm.logistic.hybrid')
+    os.remove(f'{out}.log')
+    os.remove(f'{out}.Phenotype.glm.logistic.hybrid')
 
-# gwas evaluation
+# saige gwas
+def split_plink_bfile(bfile):
+    for chr in range(1,23):
+        result = subprocess.run(f'''module load plink/1.9 && plink --bfile {bfile} \
+          --chr {chr} \
+          --make-bed \
+          --out {bfile}_{chr}''', shell=True, capture_output=True, text=True, executable='/bin/bash')
+        result.check_returncode()
 
-def counts_from_bool(true_arr, pred_arr):
-    tp = np.count_nonzero(pred_arr & true_arr)
-    tn = np.count_nonzero(~pred_arr & ~true_arr)
-    fp = np.count_nonzero(pred_arr & ~true_arr)
-    fn = np.count_nonzero(~pred_arr & true_arr)
-    return tn, fp, fn, tp
+# step 1: run null GRM for each phenotype
+def run_step1(plinkFile, phenoFile, out):
+    saige_phenoFile = pd.read_csv(phenoFile,sep='\t')
+    # run null model
+    result = subprocess.run(f"module load R/4.3.3 \
+                            && Rscript $(echo $CMAKE_PREFIX_PATH | tr ':' '\n' | grep R/4.3.3)/SAIGE/extdata/step1_fitNULLGLMM.R \
+                            --useSparseGRMtoFitNULL=FALSE \
+                            --plinkFile={plinkFile} \
+                            --phenoFile={phenoFile}\
+                            --skipVarianceRatioEstimation=FALSE \
+                            --phenoCol=Phenotype \
+                            --covarColList={','.join([i for i in saige_phenoFile.columns if i not in ['Phenotype','IID']])} \
+                            --qCovarColList=Sex \
+                            --sampleIDColinphenoFile=IID \
+                            --traitType=binary \
+                            --LOCO=TRUE \
+                            --outputPrefix={out} \
+                            --nThreads=16 \
+                            --isCovariateOffset=FALSE \
+                            --IsOverwriteVarianceRatioFile=TRUE", shell=True, capture_output=True, text=True, executable='/bin/bash')
+    result.check_returncode()
 
-def metrics_from_counts(tn, fp, fn, tp):
-    n = tn + fp + fn + tp
-    acc  = (tp + tn) / n 
-    prec = tp / (tp + fp) if (tp+fp)>0 else np.nan
-    rec  = tp / (tp + fn) if (tp+fn)>0 else np.nan
-    f1   = 2 * prec * rec / (prec + rec) if (prec + rec)>0 else np.nan
-    spec = tn / (tn + fp) if (tn + fp)>0 else np.nan
-    return acc, prec, rec, f1, spec
+def submit_step2_job(bfile, GMMATmodelFile, varianceRatioFile, intermediate_saige_dir, out):
+    # run association tests LOCO
+    job_ids = []
+    for chr in range(1,23):
+        job_name = f"{os.path.basename(out)}_chr_{chr}"
+        slurm_script = f'{intermediate_saige_dir}/{job_name}.sh'
+        slurm_content = f"""#!/bin/bash
+#SBATCH --job-name={job_name}
+#SBATCH --output={intermediate_saige_dir}/{job_name}.out
+#SBATCH --error={intermediate_saige_dir}/{job_name}.err
+#SBATCH --time=24:00:00
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=4G
 
-def evaluate_gwas(output_dir,ps, e, init, num_markers_assoc, phenotypic_subgroup,sig_level=5e-8):
-    output_file_suffix = sim_functions.get_output_file_suffix(ps, e, init, num_markers_assoc)
-    meta_path = f"{output_dir}/simulation_metadata_{output_file_suffix}.pkl"
+module load R/4.3.3 
+Rscript $(echo $CMAKE_PREFIX_PATH | tr ':' '\n' | grep R/4.3.3)/SAIGE/extdata/step2_SPAtests.R \\
+--bedFile={bfile}_{chr}.bed \\
+--bimFile={bfile}_{chr}.bim \\
+--famFile={bfile}_{chr}.fam \\
+--AlleleOrder=alt-first \\
+--SAIGEOutputFile={out}_chr_{chr} \\
+--GMMATmodelFile={GMMATmodelFile} \\
+--varianceRatioFile={varianceRatioFile} \\
+--LOCO=TRUE \\
+--chrom={chr} \\
+--is_Firth_beta=TRUE    \\
+--pCutoffforFirth=0.01 \\
+    """
 
-    with open(meta_path, "rb") as f:
-        simulation_metadata = pickle.load(f)
+        # Write script to file
+        with open(slurm_script, 'w') as f:
+            f.write(slurm_content)
 
-
-    # read both covariate and no-covariate files once
-    df_with = (pd.read_parquet(
-        f"{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_True_results.parquet")
-        .rename(columns={"OR": "OR_with_pcs", "P": "P_with_pcs","LOG(OR)_SE":"LOG(OR)_SE_with_pcs"}))
+        # Submit the job
+        result = subprocess.run(f"sbatch {slurm_script}", shell=True, check=True, capture_output=True, text=True)
+        job_id = result.stdout.strip().split()[-1]
+        job_ids.append(job_id)
     
-    df_with = df_with[(df_with['ERRCODE']=='.')].copy() 
+    # wait for all jobs to complete
+    while True:
+        result = subprocess.run(
+            f"squeue -h -j {','.join(job_ids)}",
+            shell=True, capture_output=True, text=True
+        )
+        if result.stdout.strip() == "":  # no jobs left
+            break
+        time.sleep(30)
 
-    df_nopcs = (pd.read_parquet(
-        f"{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_False_results.parquet")
-        .rename(columns={"OR": "OR_no_pcs", "P": "P_no_pcs","LOG(OR)_SE":"LOG(OR)_SE_no_pcs"}))
-    df_nopcs = df_nopcs[(df_nopcs['ERRCODE']=='.')].copy() # badly behaved SNP, can remove with HWE filtering (check though)
+    # consolidate saige results
+    saige_results = []
+    for chr in range(1,23):
+        saige_chr_results = pd.read_csv(f'{out}_chr_{chr}',sep='\t')
+        saige_results.append(saige_chr_results)
+    saige_results = pd.concat(saige_results)
+    saige_results.to_csv(f'{out}',index=False)
 
-    wide = df_nopcs.merge(df_with, on="ID", how="inner")
+    # remove excess files
+    for f in glob.iglob(f"{intermediate_saige_dir}/{os.path.basename(out)}*"): # clean up
+        os.remove(f)
+    for f in glob.iglob(f"{out}_chr_*"): # clean up
+        os.remove(f)
     
-    associated_markers = set(simulation_metadata["markers_assoc"][phenotypic_subgroup]) if phenotypic_subgroup in range(2) else set()
-    y_true = wide["ID"].isin(associated_markers).to_numpy() # true associations
 
-    yhat_no = (wide["P_no_pcs"].to_numpy() < sig_level) # predicted associations no PCs
-    yhat_with = (wide["P_with_pcs"].to_numpy() < sig_level) # predicted associations with PCs
 
-    tn0, fp0, fn0, tp0 = counts_from_bool(y_true, yhat_no) # tn, ... without PCs
-    tn1, fp1, fn1, tp1 = counts_from_bool(y_true, yhat_with) # tn,... with PCs
+def run_saige(plinkFile,phenoFile,intermediate_saige_dir,output_dir,phenotypic_subgroup,output_file_suffix):
+    out_suffix = f'PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_SAIGE'
+    run_step1(plinkFile=plinkFile, phenoFile=phenoFile,
+              out=f'{intermediate_saige_dir}/{out_suffix}')
 
-    acc0, prec0, rec0, f10, spec0 = metrics_from_counts(tn0, fp0, fn0, tp0) # without PCs
-    acc1, prec1, rec1, f11, spec1 = metrics_from_counts(tn1, fp1, fn1, tp1) # with PCs
+    # run association tests LOCO
+    GMMATmodelFile = f'{intermediate_saige_dir}/{out_suffix}.rda'
+    varianceRatioFile = f'{intermediate_saige_dir}/{out_suffix}.varianceRatio.txt'
+    # runs for each chr then consolidates into out file
+    submit_step2_job(bfile=f'{output_dir}/G', GMMATmodelFile=GMMATmodelFile, varianceRatioFile=varianceRatioFile,
+                    intermediate_saige_dir=intermediate_saige_dir, 
+                      out=f'{output_dir}/GWAS_RESULTS/{out_suffix}')
 
+def consolidate_files(plink_nocovs_filepath, plink_covs_filepath, saige_filepath, out):
+    # merge all into one long format parquet
+    plink_results_nocovs = pd.read_parquet(plink_nocovs_filepath)
+    assert all(plink_results_nocovs['A1'] == plink_results_nocovs['ALT'])
+    plink_results_nocovs['BETA'] = np.log(plink_results_nocovs['OR']) 
+    plink_results_nocovs = plink_results_nocovs.rename(columns={'LOG(OR)_SE':'SE','Z_STAT':'Tstat'})[['#CHROM','POS','ID','REF','ALT','BETA','SE','Tstat','P']].copy()
+    plink_results_nocovs['assoc_test'] = 'LR'
+
+    plink_results_covs = pd.read_parquet(plink_covs_filepath)
+    assert all(plink_results_covs['A1'] == plink_results_covs['ALT'])
+    plink_results_covs['BETA'] = np.log(plink_results_covs['OR']) 
+    plink_results_covs = plink_results_covs.rename(columns={'LOG(OR)_SE':'SE','Z_STAT':'Tstat'})[['#CHROM','POS','ID','REF','ALT','BETA','SE','Tstat','P']].copy()
+    plink_results_covs['assoc_test'] = 'LR w/ Covs'
+
+    saige_results = pd.read_csv(saige_filepath)
+    saige_results = saige_results.rename(columns={'CHR':'#CHROM','MarkerID':'ID','Allele1':'REF','Allele2':'ALT','p.value':'P'})[['#CHROM','POS','ID','REF','ALT','BETA','SE','Tstat','P']].copy()
+    saige_results['assoc_test'] = 'SAIGE w/ Covs'
+
+    # only keep tests in all three (in case plink hit error code)
+    common_ids = set(plink_results_nocovs['ID']) \
+                & set(plink_results_covs['ID']) \
+                & set(saige_results['ID'])
+    plink_results_nocovs = plink_results_nocovs[plink_results_nocovs['ID'].isin(common_ids)].copy()
+    plink_results_covs   = plink_results_covs[plink_results_covs['ID'].isin(common_ids)].copy()
+    saige_results        = saige_results[saige_results['ID'].isin(common_ids)].copy()
+
+
+    assert plink_results_nocovs.shape[0] == plink_results_covs.shape[0] 
+    assert saige_results.shape[0] == plink_results_covs.shape[0]
+    assert all(saige_results['ALT'].values==plink_results_nocovs['ALT'].values)
+    assert all(saige_results['ALT'].values==plink_results_covs['ALT'].values)
+
+    gwas_merged = pd.concat([plink_results_nocovs,plink_results_covs,saige_results])
+    gwas_merged.to_parquet(out)
+
+    os.remove(plink_nocovs_filepath)
+    os.remove(plink_covs_filepath)
+    os.remove(saige_filepath)
+
+def run_phenotypicsubgroup_gwas(output_dir,output_file_suffix,intermediate_plink_dir,intermediate_saige_dir, phenotypic_subgroup):
+    '''
+    Runs PLINK and SAIGE GWAS and outputs to parquet file
+    '''
+
+    # write phenotype file
+    phenotype_file_plink=f'{intermediate_plink_dir}/PHENOTYPE_FILE_Subgroup{phenotypic_subgroup}_{output_file_suffix}'
+    phenotype_file_saige=f'{intermediate_saige_dir}/PHENOTYPE_FILE_Subgroup{phenotypic_subgroup}_{output_file_suffix}'
+    generate_phenotype_file(simulation_metadata_path=f'{output_dir}/simulation_metadata_{output_file_suffix}.pkl', phenotypic_subgroup=phenotypic_subgroup, 
+                    covar_filepath=f'{output_dir}/COVARIATE_FILE',
+                    phenotype_file_plink=phenotype_file_plink,
+                    phenotype_file_saige=phenotype_file_saige)
+
+    # run PLINK GWAS (no covariates)
+    run_plink_gwas(bfile=f'{output_dir}/G', covariate_file=None, phenotype_file=phenotype_file_plink, 
+                   out=f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_False')
+
+    # run PLINK GWAS (with age and pcs)
+    run_plink_gwas(bfile=f'{output_dir}/G', covariate_file=f'{output_dir}/COVARIATE_FILE', phenotype_file=phenotype_file_plink, 
+                   out=f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_True')
+
+    # run SAIGE GWAS (with age and pcs)
+    # check bim df is sorted before running saige gwas
+    bim_df =  pd.read_csv(f'{output_dir}/G.bim',sep='\s+',header=None,names=['CHR','SNP','CM','POS','A1','A2'])
+    assert (bim_df['CHR'].diff().fillna(0) >= 0).all(), "CHR not sorted"
+    assert all(
+        (group['POS'].diff().fillna(0) >= 0).all()
+        for _, group in bim_df.groupby('CHR')
+    ), "POS not sorted within at least one chromosome"
+    run_saige(plinkFile=f'{output_dir}/G',phenoFile=phenotype_file_saige,output_dir=output_dir,
+              intermediate_saige_dir=intermediate_saige_dir,
+              phenotypic_subgroup=phenotypic_subgroup,output_file_suffix=output_file_suffix)
     
-    rel_change = (wide["OR_with_pcs"] - wide["OR_no_pcs"]) / wide["OR_no_pcs"]
-    prop_changed = (rel_change.abs() > 0.10).mean() # proportion where OR changes +- 10% in presence of pcs
-    rel_change_associated = (wide.loc[y_true]["OR_with_pcs"] - wide.loc[y_true]["OR_no_pcs"]) / wide.loc[y_true]["OR_no_pcs"]
-    prop_changed_associated = (rel_change_associated.abs() > 0.10).mean() # proportion where OR changes +- 10% in presence of pcs
-    avg_or_associated_with_pcs = (wide.loc[y_true]["OR_with_pcs"]).mean()
-    avg_or_associated_no_pcs = (wide.loc[y_true]["OR_no_pcs"]).mean()
-    avg_se_associated_with_pcs = (wide.loc[y_true]["LOG(OR)_SE_with_pcs"]).mean()
-    avg_se_associated_no_pcs = (wide.loc[y_true]["LOG(OR)_SE_no_pcs"]).mean()
-
-    return dict(
-        ps=ps, e=e, init=init, num_markers_assoc=num_markers_assoc, phenotypic_subgroup=phenotypic_subgroup,
-        tn_no_pcs=tn0, fp_no_pcs=fp0, fn_no_pcs=fn0, tp_no_pcs=tp0,
-        tn_with_pcs=tn1, fp_with_pcs=fp1, fn_with_pcs=fn1, tp_with_pcs=tp1,
-        acc_no_pcs=acc0,  prec_no_pcs=prec0,  rec_no_pcs=rec0,  f1_no_pcs=f10, spec_no_pcs=spec0,
-        acc_with_pcs=acc1, prec_with_pcs=prec1, rec_with_pcs=rec1, f1_with_pcs=f11, spec_with_pcs=spec1,
-        prop_changed=prop_changed, prop_changed_associated=prop_changed_associated, 
-        avg_or_associated_with_pcs=avg_or_associated_with_pcs, avg_or_associated_no_pcs=avg_or_associated_no_pcs,
-        avg_se_associated_with_pcs=avg_se_associated_with_pcs,avg_se_associated_no_pcs=avg_se_associated_no_pcs
-    )
+    # consolidate all gwas results into one parquet file
+    plink_nocovs_filepath = f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_False.parquet'
+    plink_covs_filepath = f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_True.parquet'
+    saige_filepath = f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_SAIGE'
+    consolidate_files(plink_nocovs_filepath, plink_covs_filepath, saige_filepath, 
+                      f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}.parquet')

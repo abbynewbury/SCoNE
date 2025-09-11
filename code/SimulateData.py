@@ -23,7 +23,8 @@ from functools import partial
 
 
 # DEFINE PATHS
-intermediate_plink_dir ='/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/intermediate_plink'
+intermediate_plink_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/intermediate_plink'
+intermediate_saige_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/intermediate_saige'
 root_dir = '/gpfs/commons/datasets/1000genomes'
 output_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/output'
 igsr_samples_filepath = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/input/igsr_samples.tsv'
@@ -53,9 +54,6 @@ init_list = range(100) # 100 random initializations for each combination
 
 if generate_sim:
     # RUN FILE SETUP
-    # get pcs - for later gwas evaluation
-    get_genetic_pcs(map_ped_filepath=f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05',
-                    output_dir=output_dir, ndim=20)
     # generate genetic bfile (outputs to {output_dir}/G)
     prep_1000genomes_bed_file(root_dir=root_dir, output=f'{output_dir}/G',subset_test=True) # if subset_test is true - only use 10k snps for faster processing
     # RUN FILE SETUP
@@ -98,6 +96,10 @@ if evaluate_sim:
 
 # QUANTITATIVE EVALUATION (GWAS)
     if run_gwas:
+        # get pcs 
+        get_genetic_pcs(map_ped_filepath=f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05',
+                    output_dir=output_dir, ndim=20)
+
         # write to covariate file
         igsr_samples = read_in_igsr_samples(igsr_samples_filepath, bfile_path=f'{output_dir}/G')
         pcs = pd.read_csv(f'{output_dir}/pcs.txt',sep='\t')
@@ -106,30 +108,32 @@ if evaluate_sim:
         covar[['FID','IID']+[f'PC{i}' for i in range(1,11)]+['Sex']].set_index('FID').to_csv(f'{output_dir}/COVARIATE_FILE')
 
         # split plink bfile by chr (for SAIGE LOCO)
+        split_plink_bfile(f'{output_dir}/G')
 
-        # run gwas phenotypic subgroup ~ genotypes + age + (pcs?)
+        # run gwas phenotypic subgroup ~ genotypes + age + pcs (plink w/out covs, plink w/ covs, saige w/ covs)
         run_one = partial(
         run_phenotypicsubgroup_gwas,
         intermediate_plink_dir=intermediate_plink_dir,
+        intermediate_saige_dir=intermediate_saige_dir,
         output_dir=output_dir
         )
 
         results = Parallel(n_jobs=-1)(
             delayed(run_one)(
                 output_file_suffix=get_output_file_suffix(ps,e,init,num_markers_assoc), phenotypic_subgroup=phenotypic_subgroup) 
-                for ps, e, init, num_markers_assoc, cov_included, phenotypic_subgroup  in product(ps_list, [0.50,1], init_list, num_markers_assoc_list,range(4))
+                for ps, e, init, num_markers_assoc,  phenotypic_subgroup  in product(ps_list, [0.50,1], init_list, num_markers_assoc_list,range(4))
             )
         
-    # make plots evaluating GWAS
-    combos = list(product(ps_list, [0.50,1], init_list, num_markers_assoc_list, range(4)))
-    rows = Parallel(n_jobs=-1)(
-        delayed(evaluate_gwas)(
-            output_dir=output_dir,
-            ps=ps, e=e, init=init, num_markers_assoc=num_markers_assoc, 
-            phenotypic_subgroup=phenotypic_subgroup, sig_level=5e-8
-        )
-        for (ps, e, init, num_markers_assoc, phenotypic_subgroup) in combos
-    )
+    # # make plots evaluating GWAS
+    # combos = list(product(ps_list, [0.50,1], init_list, num_markers_assoc_list, range(4)))
+    # rows = Parallel(n_jobs=-1)(
+    #     delayed(evaluate_gwas)(
+    #         output_dir=output_dir,
+    #         ps=ps, e=e, init=init, num_markers_assoc=num_markers_assoc, 
+    #         phenotypic_subgroup=phenotypic_subgroup, sig_level=5e-8
+    #     )
+    #     for (ps, e, init, num_markers_assoc, phenotypic_subgroup) in combos
+    # )
 
-    results_df = pd.DataFrame(rows)
+    # results_df = pd.DataFrame(rows)
     
