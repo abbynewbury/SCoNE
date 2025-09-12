@@ -237,7 +237,7 @@ def clean_join(values):
     vals = sorted(set(v for v in values if v != ''), key=lambda x: int(x))
     return ','.join(vals)
 
-def generate_umap_plot(mode, var_list, color_col, color_label, output_dir, igsr_samples_filepath=None): 
+def generate_umap_plot(mode, var_list, color_col, color_label, output_dir, graph_dir, igsr_samples_filepath=None): 
     '''Generate UMAP plot of C across different values of variable spcified in 'mode' 
     (values in var_list), colored by color_df (which must have a column IID)
     
@@ -289,7 +289,7 @@ def generate_umap_plot(mode, var_list, color_col, color_label, output_dir, igsr_
         + theme_minimal()
         + theme(legend_title=element_text(size=9))
     )
-    p.save(f'{output_dir}/umap_clinical_{mode}.pdf',dpi=300)
+    p.save(f'{graph_dir}/umap_clinical_{mode}.pdf',dpi=300)
 
 # GWAS RELATED
 
@@ -531,3 +531,61 @@ def run_phenotypicsubgroup_gwas(output_dir,output_file_suffix,intermediate_plink
     saige_filepath = f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_SAIGE'
     consolidate_files(plink_nocovs_filepath, plink_covs_filepath, saige_filepath, 
                       f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}.parquet')
+
+
+# evaluate gwas
+def evaluate_gwas(output_dir,ps, e, init, num_markers_assoc, phenotypic_subgroup,sig_level=5e-8):
+    output_file_suffix = get_output_file_suffix(ps, e, init, num_markers_assoc)
+    meta_path = f"{output_dir}/simulation_metadata_{output_file_suffix}.pkl"
+    with open(meta_path, "rb") as f:
+        simulation_metadata = pickle.load(f)
+    associated_markers = set(simulation_metadata["markers_assoc"][phenotypic_subgroup]) if phenotypic_subgroup in range(2) else set()
+
+    # read parquet with all gwas info
+    df = pd.read_parquet(f"{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}.parquet")    
+   
+    # get confusion matrix
+    df = df.assign(is_assoc = df["ID"].isin(associated_markers),is_sig   = df["P"] < 5e-8)
+    conf_by_method = (
+        df.groupby("assoc_test",group_keys=False)
+        .apply(lambda g: pd.Series({
+            "tp": ( g["is_sig"]  &  g["is_assoc"]).sum(),
+            "fp": ( g["is_sig"]  & ~g["is_assoc"]).sum(),
+            "tn": (~g["is_sig"]  & ~g["is_assoc"]).sum(),
+            "fn": (~g["is_sig"]  &  g["is_assoc"]).sum(),})).reset_index())
+    conf_by_method = conf_by_method.assign(
+    accuracy  = lambda d: (d.tp + d.tn) / (d.tp + d.fp + d.tn + d.fn),
+    precision = lambda d: d.tp / np.where((d.tp + d.fp) == 0, np.nan, d.tp + d.fp),
+    recall    = lambda d: d.tp / np.where((d.tp + d.fn) == 0, np.nan, d.tp + d.fn),
+    specificity = lambda d: d.tn / np.where((d.tn + d.fp) == 0, np.nan, d.tn + d.fp),
+    f1        = lambda d: (2*d.tp) / np.where((2*d.tp + d.fp + d.fn) == 0, np.nan, 2*d.tp + d.fp + d.fn))
+
+    # get change in beta and average abs beta
+    results_df = df.groupby('assoc_test',group_keys=False)['BETA'].apply(lambda x: x.abs().mean()).reset_index(name="avg_abs_beta")
+    results_df = (results_df.merge(df[df["ID"].isin(associated_markers)].groupby('assoc_test',group_keys=False)['BETA'].apply(lambda x: x.abs().mean())
+                                   .reset_index(name="avg_abs_beta_assoc"),on='assoc_test',how='left'))
+    wide = df.pivot(index="ID", columns="assoc_test", values="BETA")
+    y_true = wide.index.isin(associated_markers)# get those that are truly assoc.
+    wide["rel_change_LR_W_COVS"] = ((wide["LR w/ Covs"] - wide["LR"]) / wide["LR"]).abs()
+    wide["rel_change_SAIGE_W_COVS"] = ((wide["SAIGE w/ Covs"] - wide["LR"]) / wide["LR"]).abs()
+    wide["rel_change_LR_W_COVS_assoc"] = ((wide.loc[y_true]["LR w/ Covs"] - wide.loc[y_true]["LR"]) / wide.loc[y_true]["LR"]).abs()
+    wide["rel_change_SAIGE_W_COVS_assoc"] = ((wide.loc[y_true]["SAIGE w/ Covs"] - wide.loc[y_true]["LR"]) / wide.loc[y_true]["LR"]).abs()
+    prop_changes = {
+        "LR": {'prop_rel_change_gt10':0.0, 'prop_rel_change_gt10_associated':0.0},
+        "LR w/ Covs": {'prop_rel_change_gt10':(wide["rel_change_LR_W_COVS"] > 0.10).mean(), 
+                    'prop_rel_change_gt10_associated':(wide.loc[wide["rel_change_LR_W_COVS_assoc"].notna(),"rel_change_LR_W_COVS_assoc"] > 0.10).mean()},
+        "SAIGE w/ Covs": {'prop_rel_change_gt10':(wide["rel_change_SAIGE_W_COVS"] > 0.10).mean(), 
+                        'prop_rel_change_gt10_associated':(wide.loc[wide["rel_change_SAIGE_W_COVS_assoc"].notna(),"rel_change_SAIGE_W_COVS_assoc"] > 0.10).mean()}
+    }
+    prop_df = pd.DataFrame.from_dict(prop_changes, orient="index").reset_index(names='assoc_test')
+    results_df = results_df.merge(prop_df,on='assoc_test')
+    results_df = results_df.merge(conf_by_method,on='assoc_test')
+
+    # set param values
+    results_df['ps'] = ps
+    results_df['e'] = e
+    results_df['init'] = init
+    results_df['num_markers_assoc'] = num_markers_assoc
+    results_df['phenotypic_subgroup'] = phenotypic_subgroup
+
+    return results_df

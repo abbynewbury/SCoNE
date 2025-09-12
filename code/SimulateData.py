@@ -27,6 +27,7 @@ intermediate_plink_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_
 intermediate_saige_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/intermediate_saige'
 root_dir = '/gpfs/commons/datasets/1000genomes'
 output_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/output'
+graph_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/output'
 igsr_samples_filepath = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/input/igsr_samples.tsv'
 maf_by_superpop_filepath = f'{intermediate_plink_dir}/maf_by_superpop'
 admixture_filepath = f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5'
@@ -39,9 +40,9 @@ from simulations.genomes1000_sim import *
 
 
 # PARAMETERS
-generate_sim = True
+generate_sim = False
 evaluate_sim = True
-run_gwas = True # only will run if run_gwas=True AND evaluate_sim=True
+run_gwas = False # only will run if run_gwas=True AND evaluate_sim=True
 # generate all combinations of e and ps variables
 ps_list = [True,False]
 e_list = [0.00, 0.25, 0.50, 0.75, 1]
@@ -87,11 +88,12 @@ if evaluate_sim:
 # VISUAL EVALUATION (UMAP)
     # For ps
     generate_umap_plot(mode='ps', var_list=ps_list, color_col='Superpopulation code', 
-                            color_label='Superpopulation', output_dir=output_dir,igsr_samples_filepath=igsr_samples_filepath)
+                            color_label='Superpopulation', output_dir=output_dir,
+                            graph_dir=graph_dir,igsr_samples_filepath=igsr_samples_filepath)
 
     # For e
     generate_umap_plot(mode='e', var_list=e_list, color_col='subgroup_value', 
-                            color_label='Genetic Subgroup', output_dir=output_dir)
+                            color_label='Genetic Subgroup', output_dir=output_dir,graph_dir=graph_dir)
 
 
 # QUANTITATIVE EVALUATION (GWAS)
@@ -124,16 +126,77 @@ if evaluate_sim:
                 for ps, e, init, num_markers_assoc,  phenotypic_subgroup  in product(ps_list, [0.50,1], init_list, num_markers_assoc_list,range(4))
             )
         
-    # # make plots evaluating GWAS
-    # combos = list(product(ps_list, [0.50,1], init_list, num_markers_assoc_list, range(4)))
-    # rows = Parallel(n_jobs=-1)(
-    #     delayed(evaluate_gwas)(
-    #         output_dir=output_dir,
-    #         ps=ps, e=e, init=init, num_markers_assoc=num_markers_assoc, 
-    #         phenotypic_subgroup=phenotypic_subgroup, sig_level=5e-8
-    #     )
-    #     for (ps, e, init, num_markers_assoc, phenotypic_subgroup) in combos
-    # )
+    # make plots evaluating gwas
+    combos = list(product(ps_list, [0.50,1], init_list, num_markers_assoc_list, range(4)))
+    results_df_indiv = Parallel(n_jobs=-1)(
+        delayed(evaluate_gwas)(
+            output_dir=output_dir,
+            ps=ps, e=e, init=init, num_markers_assoc=num_markers_assoc, 
+            phenotypic_subgroup=phenotypic_subgroup, sig_level=5e-8
+        )
+        for (ps, e, init, num_markers_assoc, phenotypic_subgroup) in combos
+    )
 
-    # results_df = pd.DataFrame(rows)
+    results_df = pd.concat(results_df_indiv)
+
+    # plot of mean abs(beta) for linked markers
+    p = (ggplot(results_df[results_df['assoc_test']!='LR'], aes(x='ps', y='avg_abs_beta_assoc',fill='factor(e)'))
+    + geom_boxplot()
+    + theme_minimal()
+    + theme(figure_size=(12,8))
+    + facet_grid('assoc_test ~ num_markers_assoc')
+    + labs(title=r'Mean abs($\beta$) of Linked Markers',y=r'Mean abs($\beta$)',x=r'$p_s$')) 
+    p.save(f"{graph_dir}/SimValidation_avgbeta_linked.png", dpi=300)
+
+    p = (ggplot(results_df[results_df['assoc_test']=='LR'], aes(x='ps', y='avg_abs_beta_assoc',fill='factor(e)'))
+    + geom_boxplot()
+    + theme_minimal()
+    + theme(figure_size=(12,4))
+    + facet_grid('assoc_test ~ num_markers_assoc')
+    + labs(title=r'Mean abs($\beta$) of Linked Markers',y=r'Mean abs($\beta$)',x=r'$p_s$')) 
+    p.save(f"{graph_dir}/SimValidation_avgbeta_linked_LR.png", dpi=300)
+
+    # plot representing confounding
+    results_df['subgroup_type'] = results_df['phenotypic_subgroup'].apply(lambda x: 'genetic link subgroup' if x in range(2) else 'random subgroup')
+    p = (ggplot(results_df[results_df['assoc_test']!='LR'], aes(x='ps', y='prop_rel_change_gt10',fill='factor(e)'))
+        + geom_boxplot()
+        + theme_minimal()
+        + theme(figure_size=(12,8))
+        + facet_grid('assoc_test ~ subgroup_type')
+        + labs(title=r'% of All Markers w/ relative change in $\beta$ > $ \pm $ 10% vs. simple LR',y=r'Proportion',x=r'$p_s$')) 
+    p.save(f"{graph_dir}/SimValidation_confounding_pctchange.png", dpi=300)
+
+    # performance metrics
+    p = (ggplot(results_df, aes(x='ps', y='accuracy',fill='factor(e)'))
+    + geom_boxplot()
+    + theme_minimal()
+    + theme(figure_size=(16,8))
+    + facet_grid('assoc_test ~ subgroup_type')
+    + labs(title=r'Accuracy in identifying linked markers',y=r'Accuracy',x=r'$p_s$')) 
+    p.save(f"{graph_dir}/SimValidation_accuracy.png", dpi=300)
+
+    p = (ggplot(results_df, aes(x='ps', y='recall',fill='factor(e)'))
+    + geom_boxplot()
+    + theme_minimal()
+    + theme(figure_size=(16,8))
+    + facet_grid('assoc_test ~ subgroup_type')
+    + labs(title=r'Sensitivity in identifying linked markers',y=r'Sensitivity',x=r'$p_s$')) 
+    p.save(f"{graph_dir}/SimValidation_sensitivity.png", dpi=300)
+
+    p = (ggplot(results_df, aes(x='ps', y='specificity',fill='factor(e)'))
+    + geom_boxplot()
+    + theme_minimal()
+    + theme(figure_size=(16,8))
+    + facet_grid('assoc_test ~ subgroup_type')
+    + labs(title=r'Specificity in identifying linked markers',y=r'Specificity',x=r'$p_s$')) 
+    p.save(f"{graph_dir}/SimValidation_specificity.png", dpi=300)
+
+    results_df['pred_pos'] = results_df['tp'] + results_df['fp'] 
+    p = (ggplot(results_df, aes(x='ps', y='pred_pos',fill='factor(e)'))
+    + geom_boxplot()
+    + theme_minimal()
+    + theme(figure_size=(16,8))
+    + facet_grid('assoc_test ~ subgroup_type',scales='free_y')
+    + labs(title=r'# GWAS Hits',y=r'# GWAS Hits',x=r'$p_s$')) 
+    p.save(f"{graph_dir}/SimValidation_numgwashits.png", dpi=300)
     

@@ -25,7 +25,7 @@ def total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C)
     if bce_loss < 0:
         assert True == False, "BCE loss negative"
     f = bce_loss + kl_div_loss + regularization 
-    return f
+    return f, bce_loss, kl_div_loss, regularization
 
 # Per-block factories (compute precomputes once per inner solve)
 
@@ -199,7 +199,12 @@ def alternating_opt(
         return res.x.reshape(X.shape, order='F')
 
     # initial objective
-    f_prev = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C)
+    loss_dict = {}
+    f_prev, bce_loss, kl_div_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C)
+    loss_dict['total_loss'] = [f_prev]
+    loss_dict['bce_loss'] = [bce_loss]
+    loss_dict['kl_div_loss'] = [kl_div_loss]
+    loss_dict['regularization'] = [regularization]
 
     for _ in range(max_outer):
         W   = one_block_update("W",   W, method, options)
@@ -208,9 +213,14 @@ def alternating_opt(
         U_G = one_block_update("U_G", U_G, method, options)
         U_C = one_block_update("U_C", U_C, method, options)
 
-        f_cur = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C)
+        f_cur, bce_loss, kl_div_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C)
+        loss_dict['total_loss'].append(f_cur)
+        loss_dict['bce_loss'].append(bce_loss)
+        loss_dict['kl_div_loss'].append(kl_div_loss)
+        loss_dict['regularization'].append(regularization)
+
         if (f_prev - f_cur) / max(1.0, abs(f_prev)) < tol:
             break
         f_prev = f_cur
 
-    return W, H_G, H_C, U_G, U_C
+    return {"W":W, "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C}, loss_dict
