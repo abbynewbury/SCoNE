@@ -246,14 +246,14 @@ def generate_umap_plot(mode, var_list, color_col, color_label, output_dir, graph
     plot_dfs = []
     for var in var_list:
         if mode == 'ps':
-            output_file_suffix = get_output_file_suffix(ps=var,e=0.5,init=0,num_markers_assoc=2000) # choose first initialization and 2000 markers assoc for vis purposes
+            output_file_suffix = get_output_file_suffix(ps=var,e=0.5,init=0,num_markers_assoc=100) # choose first initialization and 100 markers assoc for vis purposes
             with open(f"{output_dir}/simulation_metadata_{output_file_suffix}.pkl", "rb") as f:
                 simulation_metadata = pickle.load(f)
             iid_order = simulation_metadata['iid_order']
             color_df = read_in_igsr_samples(igsr_samples_filepath, bfile_path=f'{output_dir}/G')
         else:
             assert mode=='e', "only works with modes ps and e so far"
-            output_file_suffix = get_output_file_suffix(ps=False,e=var,init=0,num_markers_assoc=2000) # choose first initialization and 2000 markers assoc for vis purposes
+            output_file_suffix = get_output_file_suffix(ps=False,e=var,init=0,num_markers_assoc=100) # choose first initialization and 100 markers assoc for vis purposes
             with open(f"{output_dir}/simulation_metadata_{output_file_suffix}.pkl", "rb") as f:
                 simulation_metadata = pickle.load(f)
             iid_order = simulation_metadata['iid_order']

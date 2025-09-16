@@ -45,8 +45,8 @@ evaluate_sim = True
 run_gwas = False # only will run if run_gwas=True AND evaluate_sim=True
 # generate all combinations of e and ps variables
 ps_list = [True,False]
-e_list = [0.00, 0.25, 0.50, 0.75, 1]
-num_markers_assoc_list = [100,2000]
+e_list = [0.25, 0.50, 0.75, 1]
+num_markers_assoc_list = [100,500] 
 init_list = range(100) # 100 random initializations for each combination
 # PARAMETERS
 
@@ -62,7 +62,7 @@ if generate_sim:
     combos = list(product(ps_list, e_list, init_list, num_markers_assoc_list))
     child_ss = np.random.SeedSequence().spawn(len(combos)) 
     run_seeds = [int(np.random.default_rng(ss).integers(1, 2**31 - 1)) for ss in child_ss] # for reproducible randomness
-    # run with 2000 or 100 associated markers, 100 random initializations each
+    # run with 500 or 100 associated markers, 100 random initializations each
     run_one = partial(
         sun_generate_sim_data,
         bfile_path=f'{output_dir}/G', af_df_filepath=admixture_filepath,
