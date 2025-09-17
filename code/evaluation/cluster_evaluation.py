@@ -11,12 +11,12 @@ def compute_sim_metrics(factor_matrices,ground_truth):
     # factor matrices & ground truth should be dict with "W" as key
     W_true = ground_truth["W"]
     W = factor_matrices["W"]
-    # 1) Build similarity matrix S 4x2 to designate column of W to subgroup
-    S = np.empty((2, 2), dtype=float)
+    # 1) Build similarity matrix S 4xW.shape[1] to designate column of W to subgroup
+    S = np.empty((2, W.shape[1]), dtype=float)
 
     # i is true subgroup designation, j is
-    for i in range(2): # only let it be one of the genetically informed subgroups
-        for j in range(2):
+    for i in range(2): # only let it be one of the genetically informed subgroups which are first two columns of W_true
+        for j in range(W.shape[1]):
             cos_sim = (np.dot(W_true[:, i],W[:, j]))/(np.linalg.norm(W_true[:, i])*np.linalg.norm(W[:, j]))
             S[i, j] = cos_sim
     # assign match up between row and col
@@ -44,7 +44,6 @@ def compute_sim_metrics(factor_matrices,ground_truth):
         f1_scores = 2 * (precs[:-1][valid] * recs[:-1][valid]) / (precs[:-1][valid] + recs[:-1][valid])
         best_idx = np.nanargmax(f1_scores)
         best_threshold = thresh[valid][best_idx]
-        print(best_threshold)
 
         
         yhat = (p >= best_threshold).astype(int)
@@ -62,5 +61,12 @@ def compute_sim_metrics(factor_matrices,ground_truth):
         results[f"Precision_{i_true}"] = prec
         results[f"Recall_{i_true}"] = rec
         results[f"NMI_{i_true}"] = nmi
-
+    results['mean_cosine_sim'] = (results[f"cosine_sim_0"] + results[f"cosine_sim_1"])/2
+    results['mean_AUROC'] = (results[f"AUROC_0"] + results[f"AUROC_1"])/2
+    results['mean_AUPRC'] = (results[f"AUPRC_0"] + results[f"AUPRC_1"])/2
+    results['mean_Brier'] = (results[f"Brier_0"] + results[f"Brier_1"])/2
+    results['mean_F1'] = (results[f"F1_0"] + results[f"F1_1"])/2
+    results['mean_Precision'] = (results[f"Precision_0"] + results[f"Precision_1"])/2
+    results['mean_Recall'] = (results[f"Recall_0"] + results[f"Recall_1"])/2
+    results['mean_NMI'] = (results[f"NMI_0"] + results[f"NMI_1"])/2
     return results
