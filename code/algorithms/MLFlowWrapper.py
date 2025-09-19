@@ -11,7 +11,7 @@ import resource
 def train_with_mlflow(
     algorithm_func,         # expected to return factor_matrices, loss_history 
     # ^ (ASSUMES LOSS HISTORY KEYS HAVE VALUES ALL OF SAME LENGTH)
-    algorithm_func_inputs,  # tuple of inputs to algorithm_func
+    algorithm_func_kwargs,  # dict of inputs to algorithm_func
     params,                 # param dict (including optimization params like tol)
     #state_dict,             # state dict defining model specifics (optimization params like tol)
     experiment_name, # name to identify dataset
@@ -34,8 +34,8 @@ def train_with_mlflow(
     """
     os.makedirs(artifact_dir, exist_ok=True)
     mlflow.set_tracking_uri("file:" + artifact_dir)
-    mlflow.set_experiment(experiment_name)
-    with mlflow.start_run(run_name=run_name, nested=nested):
+    exp = mlflow.set_experiment(experiment_name)
+    with mlflow.start_run(experiment_id=exp.experiment_id,run_name=run_name, nested=nested):
         # 1) Log parameters once
         mlflow.log_params(params)
 
@@ -45,7 +45,7 @@ def train_with_mlflow(
         start_user_time = os.times().user
         start_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
-        factor_matrices, loss_history = algorithm_func(*algorithm_func_inputs)
+        factor_matrices, loss_history = algorithm_func(**algorithm_func_kwargs)
 
         gc.collect()
         end_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -66,17 +66,19 @@ def train_with_mlflow(
 
         # 4) Evaluation
         if eval_fn:
-            # TODO: read in true data from simulated metadata
+            print(params)
             val_metrics = eval_fn(factor_matrices=factor_matrices,ground_truth=ground_truth)
-            # prefix metrics to keep them organized
             mlflow.log_metrics({k: v for k, v in val_metrics.items()})
 
         # 5) Log everything into final state as an artifact - for safe-keeping
         state = {}
         state["num_epochs"] = num_epochs
-        state["method"] = run_name
-        for k, v in val_metrics.items():
+        for k, v in loss_history.items():
             state[k] = v
+        state["method"] = run_name
+        if eval_fn:
+            for k, v in val_metrics.items():
+                state[k] = v
         for k,v in params.items():
             state[k] = v
         for k,v in {'max mem':max_mem, 'cpu time':cpu_time, 'user time':user_time}.items():

@@ -1,5 +1,5 @@
 import numpy as np
-
+from collections import defaultdict
 from scipy.optimize import minimize
 from scipy.special import gammaln
 from utilities import vec2mats, mats2vec, sigmoid
@@ -65,12 +65,12 @@ def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambd
         return GW.flatten(order='F')
     return fun, jac
 
-def make_fg_HG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C):
+def make_fg_HG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, G_loss, C_loss):
     # Precompute terms independent of H_G
     U1 = Z@U_G.T
     C_hat = np.clip(W@H_C.T + Z@U_C.T, 1e-7, np.inf)
-    kl_div_loss = np.sum(-np.multiply(C,np.log(C_hat)) + C_hat + gammaln(C + 1)) # log(C!) can help stabilize
     E_g = np.ones(G.shape)
+    kl_div_loss = np.sum(-np.multiply(C,np.log(C_hat)) + C_hat + gammaln(C + 1)) # log(C!) can help stabilize
     reg = lambda_W/2* np.trace(W.T @ W) +  lambda_H_C/2* np.trace(H_C.T @ H_C)
     def fun(x):
         H_G = x.reshape(shape, order='F')
@@ -167,7 +167,7 @@ def make_fg_UC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lamb
         return GU_C.flatten(order='F')
     return fun, jac
 
-# speed up when running separate function for optimization of each matrix (unlike in JointMF_AAO)
+
 def alternating_opt(
     G,C,Z,              # true matrices
     W, H_G, H_C, U_G, U_C,  # initializations
@@ -178,6 +178,13 @@ def alternating_opt(
     tol=1e-4,
     nonneg=True             # set per-block L-BFGS-B bounds to [0, +inf)
 ):
+    '''
+    To remove sparsity (CoNE) - set all lambda = 0
+    To remove covariates Z (HNMF, SHNMF) - set Z = np.zeros((Z.shape[0],Z.shape[1]))
+    To run G only (GNMF)
+    To run C only (CNMF)
+    To run with all Frobenius norm (SCoNE (Fro))
+    '''
     def one_block_update(name, X, method, options):
         x0 = X.flatten(order='F') 
         bnds = [(0, None)] * x0.size if nonneg else None
@@ -199,12 +206,8 @@ def alternating_opt(
         return res.x.reshape(X.shape, order='F')
 
     # initial objective
-    loss_dict = {}
+    loss_dict = defaultdict(list)
     f_prev, bce_loss, kl_div_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C)
-    loss_dict['total_loss'] = [f_prev]
-    loss_dict['bce_loss'] = [bce_loss]
-    loss_dict['kl_div_loss'] = [kl_div_loss]
-    loss_dict['regularization'] = [regularization]
 
     for _ in range(max_outer):
         W   = one_block_update("W",   W, method, options)
@@ -218,9 +221,30 @@ def alternating_opt(
         loss_dict['bce_loss'].append(bce_loss)
         loss_dict['kl_div_loss'].append(kl_div_loss)
         loss_dict['regularization'].append(regularization)
+        
+        # record matrix norms
+        loss_dict['W_norm'].append(np.linalg.norm(W))
+        loss_dict['H_G_norm'].append(np.linalg.norm(H_G))
+        loss_dict['H_C_norm'].append(np.linalg.norm(H_C))
+        loss_dict['U_G_norm'].append(np.linalg.norm(U_G))
+        loss_dict['U_C_norm'].append(np.linalg.norm(U_C))
 
+        # record sparsity
+        loss_dict['W_sparsity'].append(100*np.count_nonzero(W == 0)/ W.size)
+        loss_dict['H_G_sparsity'].append(100*np.count_nonzero(H_G == 0)/ H_G.size)
+        loss_dict['H_C_sparsity'].append(100*np.count_nonzero(H_C == 0)/ H_C.size)
+        loss_dict['U_G_sparsity'].append(100*np.count_nonzero(U_G == 0)/ U_G.size) # expect to stay fairly constant over time
+        loss_dict['U_C_sparsity'].append(100*np.count_nonzero(U_C == 0)/ U_C.size) # expect to stay fairly constant over time
+        
         if (f_prev - f_cur) / max(1.0, abs(f_prev)) < tol:
             break
         f_prev = f_cur
 
+    # Normalize columns of W to L2 norm and scale rows of H to resolve scaling ambiguity
+    norms = np.linalg.norm(W, axis=0)
+    norms[norms == 0] = 1.0
+    W = W / norms
+    # scale rows of H_G and H_C
+    H_G = H_G * norms[np.newaxis, :]
+    H_C = H_C * norms[np.newaxis, :]
     return {"W":W, "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C}, loss_dict

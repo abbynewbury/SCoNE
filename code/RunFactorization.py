@@ -1,7 +1,7 @@
 #! /gpfs/commons/home/anewbury/miniconda/envs/jupyter/bin/python3
 #SBATCH --job-name=RunFactorization
 #SBATCH --nodes=1
-#SBATCH --mem=40G
+#SBATCH --mem=90G
 #SBATCH --cpus-per-task=24
 #SBATCH --time=120:00:00
 #SBATCH --mail-type=ALL
@@ -50,7 +50,7 @@ af_df_filepath=admixture_filepath
 
 sys.path.append(code_dir)
 import simulations.genomes1000_sim as sim_functions
-import algorithms.JointMF as JointMF
+import unsupervised_pheno.code.algorithms.SCoNE as SCoNE
 import algorithms.JointMF_AAO as JointMF_AAO
 import algorithms.MLFlowWrapper as MLFlowWrapper
 import evaluation.cluster_evaluation as cluster_evaluation
@@ -77,73 +77,93 @@ assert all(bim_df['SNP'].values==G_columns)
 
 # run factorization
 rank = 3
-lambda_W, lambda_H_G, lambda_H_C = (0,0,0) # TODO, grid search over these
-W = np.random.random((G.shape[0], rank))*1e-2+1e-6 
+W = np.random.random((G.shape[0], rank))*1e-2+1e-6 # aorund 0 to 1e-2
 H_G = np.random.random((G.shape[1], rank))*1e-2+1e-6
-H_C = np.random.random((100, rank))*1e-2+1e-6 # 100 clinical vars
+H_C = np.random.random((100, rank))*1e-2+1e-6 # fixed: 100 clinical vars
 U_G = np.random.random((G.shape[1], Z.shape[1]))*1e-2+1e-6
 U_C = np.random.random((100, Z.shape[1]))*1e-2+1e-6
 
-combos = list(product(ps_list, e_list, init_list, num_markers_assoc_list))
 all_results = []
 
-def run_one_wrapper(run_one, ps, e, init, num_markers_assoc, exp_num, Z_included): # TODO: really need to clean up code, very convoluted
+def run_one_wrapper(ps, e, init, num_markers_assoc, 
+                    G, Z,
+                    W, H_G, H_C, U_G, U_C,
+                    lambda_W, lambda_H_G, lambda_H_C,
+                    max_outer,tol,nonneg,
+                    output_dir, exp_num,run_name): 
     output_suffix = sim_functions.get_output_file_suffix(ps=ps, e=e, init=init, num_markers_assoc=num_markers_assoc)
     C = np.load(f'{output_dir}/C_{output_suffix}.npy')
     with open(f"{output_dir}/simulation_metadata_{output_suffix}.pkl", "rb") as f:
         simulation_metadata = pickle.load(f)
     ground_truth = {"W":(simulation_metadata['phenotypic_subgroups'].pivot(index='IID',columns='phenotypic_subgroup',values='subgroup')
           .reindex(simulation_metadata['iid_order']).to_numpy().astype(int))}
-    if Z_included:
-        Z_value = Z.copy()
-    else:
-        Z_value = np.zeros((Z.shape[0],Z.shape[1]))
-    return run_one(
-        algorithm_func_inputs=(G, C, Z_value, W, H_G, H_C, U_G, U_C,
-                               lambda_W, lambda_H_G, lambda_H_C,
-                               'L-BFGS-B', {'maxcor':10,'maxiter':10,'gtol':1e-5,'maxls':5,'ftol':1e-6},
-                               30, 1e-4, True),
+
+    return MLFlowWrapper.train_with_mlflow(
+        algorithm_func=SCoNE.alternating_opt,
+        artifact_dir=artifact_dir,
+        run_name=run_name,
+        algorithm_func_kwargs={"G":G, "C":C, "Z":Z, "W":W, "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C,
+                               "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C,
+                               "method":'L-BFGS-B', "options":{'maxcor':10,'maxiter':10,'gtol':1e-5,'maxls':5,'ftol':1e-6},  # keep scipy methods and options fixed
+                               "max_outer":max_outer, "tol":tol, "nonneg":nonneg},
         params={"ps": ps, "e": e, "init": init, "num_markers_assoc": num_markers_assoc,
                 "run_seed": simulation_metadata["run_seed"], "tol": 1e-4, "max_outer": 30,
-                "lambda_W": lambda_W, "lambda_H_G": lambda_H_G, "lambda_H_C": lambda_H_C},
-        eval_fn=cluster_evaluation.compute_sim_metrics,
+                "lambda_W": lambda_W, "lambda_H_G": lambda_H_G, "lambda_H_C": lambda_H_C, "run_name":run_name,
+                "method":'L-BFGS-B', "options":{'maxcor':10,'maxiter':10,'gtol':1e-5,'maxls':5,'ftol':1e-6}},
+        eval_fn=cluster_evaluation.compute_sim_metrics, 
         ground_truth=ground_truth,
-        experiment_name=str(exp_num)
-    )
+        experiment_name=str(exp_num))
 
 os.makedirs(artifact_dir, exist_ok=True)
 
-# each unique dataset has its own experiment name
+# each unique dataset has its own experiment name - submit slurm jobs one per experiment # TODO: slurm submitit
+experiments = list(product(ps_list, e_list, init_list, num_markers_assoc_list))
 
-run_one = partial( 
-    MLFlowWrapper.train_with_mlflow,
-    algorithm_func=JointMF.alternating_opt,
-    artifact_dir=artifact_dir,
-    run_name='ours'
-)
+# TODO - step 1 hparam tuning with 1 randomly selected dataset per experiment (and then remove it from testing)
+
+# OUR METHOD
+run_name='ours'
+combos = list(product(ps_list, e_list, init_list, num_markers_assoc_list,[0,0.5,1],[0,0.5,1],[0,0.5,1]))
+index_map = {}
+mlflow.set_tracking_uri("file:" + artifact_dir)
+for i in range(len(experiments)): # set experiment names on the ourset since ap
+    exp = mlflow.set_experiment(str(i))
+results = Parallel(n_jobs=-1)( 
+    delayed(run_one_wrapper)(ps=ps, e=e, init=init, num_markers_assoc=num_markers_assoc, 
+                    G=G, Z=Z,
+                    W=W, H_G=H_G, H_C=H_C, U_G=U_G, U_C=U_C,
+                    lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,
+                    max_outer=50,tol=1e-6,nonneg=True,
+                    output_dir=output_dir, exp_num=index_map.setdefault((ps,e,num_markers_assoc), len(index_map)),run_name=f'{run_name}_lw_{lambda_W}_lhg_{lambda_H_G}_lhc_{lambda_H_C}')
+        for i, (ps, e, init, num_markers_assoc,lambda_W,lambda_H_G,lambda_H_C) in enumerate(combos)
+    )
+
+all_results.extend(results)
 
 
+# HNMF
+run_name='hnmf'
+combos = list(product(ps_list, e_list, init_list, num_markers_assoc_list))
+index_map = {}
 results = Parallel(n_jobs=-1)(
-    delayed(run_one_wrapper)(run_one, ps, e, init, num_markers_assoc, i, Z_included=True)
+    delayed(run_one_wrapper)(ps=ps, e=e, init=init, num_markers_assoc=num_markers_assoc, 
+                    G=G, Z=np.zeros((Z.shape[0],Z.shape[1])),
+                    W=W, H_G=H_G, H_C=H_C, U_G=U_G, U_C=U_C,
+                    lambda_W=0, lambda_H_G=0, lambda_H_C=0,
+                    max_outer=50,tol=1e-6,nonneg=True,
+                    output_dir=output_dir,exp_num=index_map.setdefault((ps,e,num_markers_assoc), len(index_map)),run_name=run_name)
         for i, (ps, e, init, num_markers_assoc) in enumerate(combos)
     )
 
 all_results.extend(results)
 
-run_one = partial( 
-    MLFlowWrapper.train_with_mlflow,
-    algorithm_func=JointMF.alternating_opt,
-    artifact_dir=artifact_dir,
-    run_name='hnmf'
-)
+# # TODO: C ONLY
 
 
-results = Parallel(n_jobs=-1)(
-    delayed(run_one_wrapper)(run_one, ps, e, init, num_markers_assoc, i, Z_included=False)
-        for i, (ps, e, init, num_markers_assoc) in enumerate(combos)
-    )
+# # TODO: G ONLY
 
-all_results.extend(results)
+
+# TODO: 50 inits and choose best from loss
 
 all_results = pd.DataFrame(all_results)
 all_results.to_csv(f'{output_dir}/eval_results.csv')

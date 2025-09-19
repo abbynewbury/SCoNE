@@ -40,14 +40,14 @@ from simulations.genomes1000_sim import *
 
 
 # PARAMETERS
-generate_sim = False
+generate_sim = True
 evaluate_sim = True
-run_gwas = False # only will run if run_gwas=True AND evaluate_sim=True
+run_gwas = True # only will run if run_gwas=True AND evaluate_sim=True
 # generate all combinations of e and ps variables
 ps_list = [True,False]
 e_list = [0.25, 0.50, 0.75, 1]
 num_markers_assoc_list = [100,500] 
-init_list = range(100) # 100 random initializations for each combination
+init_list = range(101) # 100 random initializations for each combination
 # PARAMETERS
 
 

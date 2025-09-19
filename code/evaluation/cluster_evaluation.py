@@ -39,14 +39,14 @@ def compute_sim_metrics(factor_matrices,ground_truth):
         brier = brier_score_loss(y, p)
 
         # chose best threshold by f1 score
-        precs, recs, thresh = precision_recall_curve(y, p)
-        valid = (thresh > 0) & (thresh < 1)
-        f1_scores = 2 * (precs[:-1][valid] * recs[:-1][valid]) / (precs[:-1][valid] + recs[:-1][valid])
-        best_idx = np.nanargmax(f1_scores)
-        best_threshold = thresh[valid][best_idx]
+        # precs, recs, thresh = precision_recall_curve(y, p)
+        # valid = (thresh > 0) & (thresh < 1)
+        # f1_scores = 2 * (precs[:-1][valid] * recs[:-1][valid]) / (precs[:-1][valid] + recs[:-1][valid])
+        # best_idx = np.nanargmax(f1_scores)
+        # best_threshold = thresh[valid][best_idx]
 
         
-        yhat = (p >= best_threshold).astype(int)
+        yhat = (p >= 0.5).astype(int)
         f1  = f1_score(y, yhat) if y.min() != y.max() else np.nan
         prec = precision_score(y, yhat, zero_division=0)
         rec  = recall_score(y, yhat, zero_division=0)
