@@ -24,6 +24,9 @@ from joblib import Parallel, delayed
 from functools import partial
 import sys
 import mlflow
+import submitit
+
+import random
 
 
 intermediate_plink_dir ='/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/intermediate_plink'
@@ -43,7 +46,6 @@ evaluate_sim = True
 ps_list = [True,False]
 e_list = [0.25,0.75,0.5,1] 
 num_markers_assoc_list = [100,500]
-init_list = range(1) # 100 random initializations for each combination, TODO: change to 100
 bfile_path=f'{output_dir}/G'
 af_df_filepath=admixture_filepath
 # PARAMETERS
@@ -51,7 +53,6 @@ af_df_filepath=admixture_filepath
 sys.path.append(code_dir)
 import simulations.genomes1000_sim as sim_functions
 import unsupervised_pheno.code.algorithms.SCoNE as SCoNE
-import algorithms.JointMF_AAO as JointMF_AAO
 import algorithms.MLFlowWrapper as MLFlowWrapper
 import evaluation.cluster_evaluation as cluster_evaluation
 import importlib
@@ -85,13 +86,18 @@ U_C = np.random.random((100, Z.shape[1]))*1e-2+1e-6
 
 all_results = []
 
-def run_one_wrapper(ps, e, init, num_markers_assoc, 
+
+def _call_kwargs(kw):
+    return run_one_wrapper(**kw)  # expands kwargs dict
+
+def run_one_wrapper(ps, e, dataset, num_markers_assoc, init,
                     G, Z,
                     W, H_G, H_C, U_G, U_C,
                     lambda_W, lambda_H_G, lambda_H_C,
+                    G_loss_type, C_loss_type,
                     max_outer,tol,nonneg,
                     output_dir, exp_num,run_name): 
-    output_suffix = sim_functions.get_output_file_suffix(ps=ps, e=e, init=init, num_markers_assoc=num_markers_assoc)
+    output_suffix = sim_functions.get_output_file_suffix(ps=ps, e=e, dataset=dataset, num_markers_assoc=num_markers_assoc)
     C = np.load(f'{output_dir}/C_{output_suffix}.npy')
     with open(f"{output_dir}/simulation_metadata_{output_suffix}.pkl", "rb") as f:
         simulation_metadata = pickle.load(f)
@@ -105,8 +111,9 @@ def run_one_wrapper(ps, e, init, num_markers_assoc,
         algorithm_func_kwargs={"G":G, "C":C, "Z":Z, "W":W, "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C,
                                "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C,
                                "method":'L-BFGS-B', "options":{'maxcor':10,'maxiter':10,'gtol':1e-5,'maxls':5,'ftol':1e-6},  # keep scipy methods and options fixed
+                               "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
                                "max_outer":max_outer, "tol":tol, "nonneg":nonneg},
-        params={"ps": ps, "e": e, "init": init, "num_markers_assoc": num_markers_assoc,
+        params={"ps": ps, "e": e, "dataset": dataset, "num_markers_assoc": num_markers_assoc, "init":init,
                 "run_seed": simulation_metadata["run_seed"], "tol": 1e-4, "max_outer": 30,
                 "lambda_W": lambda_W, "lambda_H_G": lambda_H_G, "lambda_H_C": lambda_H_C, "run_name":run_name,
                 "method":'L-BFGS-B', "options":{'maxcor':10,'maxiter':10,'gtol':1e-5,'maxls':5,'ftol':1e-6}},
@@ -114,56 +121,117 @@ def run_one_wrapper(ps, e, init, num_markers_assoc,
         ground_truth=ground_truth,
         experiment_name=str(exp_num))
 
+def get_tuning_dataset(ps, e, num_markers_assoc, tuning_dataset):
+    key = (ps, e, num_markers_assoc)
+    if key not in tuning_dataset:
+        tuning_dataset[key] = random.randint(1, 101)
+    return tuning_dataset[key]
+
 os.makedirs(artifact_dir, exist_ok=True)
+os.makedirs(f"{os.path.dirname(artifact_dir)}/slurm_logs", exist_ok=True)
 
-# each unique dataset has its own experiment name - submit slurm jobs one per experiment # TODO: slurm submitit
-experiments = list(product(ps_list, e_list, init_list, num_markers_assoc_list))
+# Step 1 hparam tuning with 1 randomly selected dataset per experiment (and then remove it from testing)
 
-# TODO - step 1 hparam tuning with 1 randomly selected dataset per experiment (and then remove it from testing)
-
-# OUR METHOD
-run_name='ours'
-combos = list(product(ps_list, e_list, init_list, num_markers_assoc_list,[0,0.5,1],[0,0.5,1],[0,0.5,1]))
+# submit as a SLURM array (adjust params as needed)
+executor = submitit.AutoExecutor(folder=f"{os.path.dirname(artifact_dir)}/slurm_logs")
+executor.update_parameters(
+    slurm_job_name="fact-grid",
+    slurm_partition="compute",
+    timeout_min=240,
+    cpus_per_task=4,
+    mem_gb=16,
+    array_parallelism=64,
+    slurm_additional_parameters={
+        "output": "slurm_logs/%x_%A_%a.out",
+        "error":  "slurm_logs/%x_%A_%a.err",
+    },
+)
+combos = list(product(ps_list, e_list, num_markers_assoc_list,[0,0.25,0.5,0.75,1],[0,0.25,0.5,0.75,1],[0,0.25,0.5,0.75,1]))
 index_map = {}
-mlflow.set_tracking_uri("file:" + artifact_dir)
-for i in range(len(experiments)): # set experiment names on the ourset since ap
-    exp = mlflow.set_experiment(str(i))
-results = Parallel(n_jobs=-1)( 
-    delayed(run_one_wrapper)(ps=ps, e=e, init=init, num_markers_assoc=num_markers_assoc, 
-                    G=G, Z=Z,
-                    W=W, H_G=H_G, H_C=H_C, U_G=U_G, U_C=U_C,
-                    lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,
-                    max_outer=50,tol=1e-6,nonneg=True,
-                    output_dir=output_dir, exp_num=index_map.setdefault((ps,e,num_markers_assoc), len(index_map)),run_name=f'{run_name}_lw_{lambda_W}_lhg_{lambda_H_G}_lhc_{lambda_H_C}')
-        for i, (ps, e, init, num_markers_assoc,lambda_W,lambda_H_G,lambda_H_C) in enumerate(combos)
+tuning_dataset = {}
+cfgs = [
+    dict(
+        ps=ps, e=e, dataset=get_tuning_dataset(ps, e, num_markers_assoc, tuning_dataset), num_markers_assoc=num_markers_assoc,
+        G=G, Z=Z if run_name != 'sHNMF' else np.zeros((Z.shape[0],Z.shape[1])), W=W, H_G=H_G, H_C=H_C, U_G=U_G, U_C=U_C,
+        lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,
+        max_outer=50, tol=1e-6, nonneg=True,
+        output_dir=output_dir, exp_num=index_map.setdefault((ps,e,num_markers_assoc), len(index_map)),
+        run_name=run_name,G_loss_type='bce' if run_name!='SCoNE(Fro)' else 'fro', C_loss_type='kl_div' if run_name!='SCoNE(Fro)' else 'fro'
     )
-
-all_results.extend(results)
-
-
-# HNMF
-run_name='hnmf'
-combos = list(product(ps_list, e_list, init_list, num_markers_assoc_list))
-index_map = {}
-results = Parallel(n_jobs=-1)(
-    delayed(run_one_wrapper)(ps=ps, e=e, init=init, num_markers_assoc=num_markers_assoc, 
-                    G=G, Z=np.zeros((Z.shape[0],Z.shape[1])),
-                    W=W, H_G=H_G, H_C=H_C, U_G=U_G, U_C=U_C,
-                    lambda_W=0, lambda_H_G=0, lambda_H_C=0,
-                    max_outer=50,tol=1e-6,nonneg=True,
-                    output_dir=output_dir,exp_num=index_map.setdefault((ps,e,num_markers_assoc), len(index_map)),run_name=run_name)
-        for i, (ps, e, init, num_markers_assoc) in enumerate(combos)
-    )
-
-all_results.extend(results)
-
-# # TODO: C ONLY
+    for i, (ps, e, num_markers_assoc, lambda_W, lambda_H_G, lambda_H_C, run_name) in enumerate(combos[:1]+['SCoNE','SCoNE(Fro)','sHNMF'])
+]
+# TODO, switch to for i, (ps, e, num_markers_assoc, lambda_W, lambda_H_G, lambda_H_C, run_name) in enumerate(combos+['SCoNE','SCoNE(Fro)','sHNMF'])
+jobs = executor.map_array(_call_kwargs, cfgs)
 
 
-# # TODO: G ONLY
+# # each unique dataset has its own experiment name - submit slurm jobs one per experiment # TODO: slurm submitit
+# experiments = list(product(ps_list, e_list, num_markers_assoc_list))
+# tuning_datasets = {}
+# for i in range(len(experiments)): # set experiment names on the ourset since ap
+#     exp = mlflow.set_experiment(str(i))
+#     random.seed(4)
+#     tuning_dataset = random.randint(1, 101)
+#     tuning_datasets[str(i)] = tuning_dataset
+#     for run_name in ['SCoNE','SCoNE(Fro)','sHNMF']:
+#         combos = list(product(ps_list, e_list, num_markers_assoc_list,[0,0.25,0.5,0.75,1],[0,0.25,0.5,0.75,1],[0,0.25,0.5,0.75,1]))
+#         mlflow.set_tracking_uri("file:" + artifact_dir)
+#         results = Parallel(n_jobs=-1)( 
+#             delayed(run_one_wrapper)(ps=ps, e=e, dataset=tuning_dataset, num_markers_assoc=num_markers_assoc, 
+#                             G=G, Z=Z,
+#                             W=W, H_G=H_G, H_C=H_C, U_G=U_G, U_C=U_C,
+#                             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,
+#                             max_outer=50,tol=1e-6,nonneg=True,
+#                             output_dir=output_dir, exp_num=i,run_name=f'{run_name}_lw_{lambda_W}_lhg_{lambda_H_G}_lhc_{lambda_H_C}')
+#                 for i, (ps, e, num_markers_assoc,lambda_W,lambda_H_G,lambda_H_C) in enumerate(combos)
+#             )
+
+#         all_results.extend(results)
+
+# # OUR METHOD
+# run_name='ours'
+# combos = list(product(ps_list, e_list, dataset_list, num_markers_assoc_list,[0,0.5,1],[0,0.5,1],[0,0.5,1]))
+# index_map = {}
+# mlflow.set_tracking_uri("file:" + artifact_dir)
+# for i in range(len(experiments)): # set experiment names on the ourset since ap
+#     exp = mlflow.set_experiment(str(i))
+# results = Parallel(n_jobs=-1)( 
+#     delayed(run_one_wrapper)(ps=ps, e=e, dataset=dataset, num_markers_assoc=num_markers_assoc, 
+#                     G=G, Z=Z,
+#                     W=W, H_G=H_G, H_C=H_C, U_G=U_G, U_C=U_C,
+#                     lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,
+#                     max_outer=50,tol=1e-6,nonneg=True,
+#                     output_dir=output_dir, exp_num=index_map.setdefault((ps,e,num_markers_assoc), len(index_map)),run_name=f'{run_name}_lw_{lambda_W}_lhg_{lambda_H_G}_lhc_{lambda_H_C}')
+#         for i, (ps, e, dataset, num_markers_assoc,lambda_W,lambda_H_G,lambda_H_C) in enumerate(combos)
+#     )
+
+# all_results.extend(results)
+
+# # run on remainder 100 datasets for each param combo --> 1600 runs for one algorithm
+# dataset_list = [i for i in range(101 if i!=tuning_dataset)]
+
+# # HNMF
+# run_name='hnmf'
+# combos = list(product(ps_list, e_list, dataset_list, num_markers_assoc_list))
+# index_map = {}
+# results = Parallel(n_jobs=-1)(
+#     delayed(run_one_wrapper)(ps=ps, e=e, dataset=dataset, num_markers_assoc=num_markers_assoc, 
+#                     G=G, Z=np.zeros((Z.shape[0],Z.shape[1])),
+#                     W=W, H_G=H_G, H_C=H_C, U_G=U_G, U_C=U_C,
+#                     lambda_W=0, lambda_H_G=0, lambda_H_C=0,
+#                     max_outer=50,tol=1e-6,nonneg=True,
+#                     output_dir=output_dir,exp_num=index_map.setdefault((ps,e,num_markers_assoc), len(index_map)),run_name=run_name)
+#         for i, (ps, e, dataset, num_markers_assoc) in enumerate(combos)
+#     )
+
+# all_results.extend(results)
+
+# # # TODO: C ONLY
 
 
-# TODO: 50 inits and choose best from loss
+# # # TODO: G ONLY
+
+
+# # TODO: 50 inits and choose best from loss
 
 all_results = pd.DataFrame(all_results)
 all_results.to_csv(f'{output_dir}/eval_results.csv')

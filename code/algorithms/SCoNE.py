@@ -102,6 +102,7 @@ def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambd
 
         # compute jac
         GW = GW_wrt_G + GW_wrt_C + lambda_W*W
+
         return f, GW.flatten(order='F')
     return fun
 
