@@ -66,7 +66,6 @@ def train_with_mlflow(
 
         # 4) Evaluation
         if eval_fn:
-            print(params)
             val_metrics = eval_fn(factor_matrices=factor_matrices,ground_truth=ground_truth)
             mlflow.log_metrics({k: v for k, v in val_metrics.items()})
 
