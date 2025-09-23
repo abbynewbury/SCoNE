@@ -46,8 +46,8 @@ run_gwas = True # only will run if run_gwas=True AND evaluate_sim=True
 # generate all combinations of e and ps variables
 ps_list = [True,False]
 e_list = [0.25, 0.50, 0.75, 1]
-num_markers_assoc_list = [100,500] 
-init_list = range(101) # 100 random initializations for each combination
+g_list = [100,500] # g represents the number of linked markers
+dataset_list = range(11) # 11 random datasets for each combination
 # PARAMETERS
 
 
@@ -59,10 +59,10 @@ if generate_sim:
     prep_1000genomes_bed_file(root_dir=root_dir, output=f'{output_dir}/G',subset_test=True) # if subset_test is true - only use 10k snps for faster processing
     # RUN FILE SETUP
     
-    combos = list(product(ps_list, e_list, init_list, num_markers_assoc_list))
+    combos = list(product(ps_list, e_list, dataset_list, g_list))
     child_ss = np.random.SeedSequence().spawn(len(combos)) 
     run_seeds = [int(np.random.default_rng(ss).integers(1, 2**31 - 1)) for ss in child_ss] # for reproducible randomness
-    # run with 500 or 100 associated markers, 100 random initializations each
+    # run with 500 or 100 associated markers, 11 random datasets each
     run_one = partial(
         sun_generate_sim_data,
         bfile_path=f'{output_dir}/G', af_df_filepath=admixture_filepath,
@@ -76,9 +76,9 @@ if generate_sim:
 
     results = Parallel(n_jobs=-1)(
         delayed(run_one)(
-            ps=ps, e=e, num_markers_assoc=num_markers_assoc, intermediate_file_suffix=get_output_file_suffix(ps,e,init,num_markers_assoc),
-              output_file_suffix=get_output_file_suffix(ps,e,init,num_markers_assoc),run_seed=run_seeds[i]) 
-            for i, (ps, e, init, num_markers_assoc) in enumerate(combos)
+            ps=ps, e=e, g=g, intermediate_file_suffix=get_output_file_suffix(ps,e,dataset,g),
+              output_file_suffix=get_output_file_suffix(ps,e,dataset,g),run_seed=run_seeds[i]) 
+            for i, (ps, e, dataset, g) in enumerate(combos)
         )
 
 
@@ -122,19 +122,19 @@ if evaluate_sim:
 
         results = Parallel(n_jobs=24)(
             delayed(run_one)(
-                output_file_suffix=get_output_file_suffix(ps,e,init,num_markers_assoc), phenotypic_subgroup=phenotypic_subgroup) 
-                for ps, e, init, num_markers_assoc,  phenotypic_subgroup  in product(ps_list, [0.50,1], init_list, num_markers_assoc_list,range(4))
+                output_file_suffix=get_output_file_suffix(ps,e,dataset,g), phenotypic_subgroup=phenotypic_subgroup) 
+                for ps, e, dataset, g,  phenotypic_subgroup  in product(ps_list, [0.50,1], dataset_list, g_list,range(4))
             )
         
     # make plots evaluating gwas
-    combos = list(product(ps_list, [0.50,1], init_list, num_markers_assoc_list, range(4)))
+    combos = list(product(ps_list, [0.50,1], dataset_list, g_list, range(4)))
     results_df_indiv = Parallel(n_jobs=-1)(
         delayed(evaluate_gwas)(
             output_dir=output_dir,
-            ps=ps, e=e, init=init, num_markers_assoc=num_markers_assoc, 
+            ps=ps, e=e, dataset=dataset, g=g, 
             phenotypic_subgroup=phenotypic_subgroup, sig_level=5e-8
         )
-        for (ps, e, init, num_markers_assoc, phenotypic_subgroup) in combos
+        for (ps, e, dataset, g, phenotypic_subgroup) in combos
     )
 
     results_df = pd.concat(results_df_indiv)
@@ -144,7 +144,7 @@ if evaluate_sim:
     + geom_boxplot()
     + theme_minimal()
     + theme(figure_size=(12,8))
-    + facet_grid('assoc_test ~ num_markers_assoc')
+    + facet_grid('assoc_test ~ g')
     + labs(title=r'Mean abs($\beta$) of Linked Markers',y=r'Mean abs($\beta$)',x=r'$p_s$')) 
     p.save(f"{graph_dir}/SimValidation_avgbeta_linked.png", dpi=300)
 
@@ -152,7 +152,7 @@ if evaluate_sim:
     + geom_boxplot()
     + theme_minimal()
     + theme(figure_size=(12,4))
-    + facet_grid('assoc_test ~ num_markers_assoc')
+    + facet_grid('assoc_test ~ g')
     + labs(title=r'Mean abs($\beta$) of Linked Markers',y=r'Mean abs($\beta$)',x=r'$p_s$')) 
     p.save(f"{graph_dir}/SimValidation_avgbeta_linked_LR.png", dpi=300)
 

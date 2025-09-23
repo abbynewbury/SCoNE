@@ -187,6 +187,7 @@ def alternating_opt(
     options,
     G_loss_type, C_loss_type, # in 'kl_div', 'bce', 'fro' or None (None indicates not fitting to data, i.e. if G_loss_type=None & C_loss_type='fro then C only optimization)
     max_outer=30,
+    min_outer=5,
     tol=1e-4,
     nonneg=True             # set per-block L-BFGS-B bounds to [0, +inf)
 ):
@@ -250,7 +251,7 @@ def alternating_opt(
         loss_dict['U_G_sparsity'].append(100*np.count_nonzero(U_G == 0)/ U_G.size) # expect to stay fairly constant over time
         loss_dict['U_C_sparsity'].append(100*np.count_nonzero(U_C == 0)/ U_C.size) # expect to stay fairly constant over time
         
-        if (f_prev - f_cur) / max(1.0, abs(f_prev)) < tol:
+        if ((f_prev - f_cur) / max(1.0, abs(f_prev)) < tol) and _ >= min_outer:
             break
         f_prev = f_cur
 

@@ -62,15 +62,15 @@ def read_in_igsr_samples(igsr_samples_filepath,bfile_path=None):
     return igsr_samples
 
 
-def get_output_file_suffix(ps,e,init,num_markers_assoc):
-    return f'ps_{ps}_e_{e}_init_{init}_markersassoc_{num_markers_assoc}'
+def get_output_file_suffix(ps,e,dataset,g):
+    return f'ps_{ps}_e_{e}_dataset_{dataset}_g_{g}'
 
 def rs(streams,stream_name):
         return int(streams[stream_name].integers(1, 2**31 - 1))
 
 def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
                           intermediate_file_dir,intermediate_file_suffix,output_dir,output_file_suffix,
-                          ps,num_markers_assoc,e,extra_subgroups_size,M,num_clinical_assoc, run_seed):
+                          ps,g,e,extra_subgroups_size,M,num_clinical_assoc, run_seed):
     '''
     Generate synthetic data similar to Sun et al. (Multi-view biclustering for genotype-phenotype association studies of complex diseases)
     using 1000 Genomes Phase 3 data. Use admixture files which contain 193634 markers with MAF>5% and 2504 individuals. 
@@ -87,7 +87,7 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
     M: number of clinical features (right now assuming all from one domain & all binary)
     ps: variable controlling how much population stratification is affecting geno-pheno relationship (needs to be in range(0,1,size=0.1)) 
     (0-> pick SNPs in bottom 10% by allele frequency variance i.e. little pop. strat., 0.9-> pick SNPS in top 10% by allele frequency variance i.e. large pop. strat.)
-    num_markers_assoc: number of markers with an associated with subtype classification (if rij>int(0.4*markers_assoc) then subject i in subgroup j)
+    g: number of markers linked with subtype classification (if rij>int(0.4*markers_assoc) then subject i in subgroup j)
     e: relative effect that genetic variation contributed to the effect of the phenotype. e in [0,1]. (decreased e means higher level of disagreement between genotypic and phenotypic subgroups)
     num_clinical_assoc: number of clinical features associated with subtype classification (same for all subtypes)
     extra_subgroups_size: number of people in s3 and s4 (selected at random)
@@ -131,9 +131,9 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
     genetic_subgroups = []
     markers_assoc_dict = {} # names of the markers that are associated with each subgroup
     for genetic_subgroup in range(2):
-        # Select SNP group based on num_markers_assoc and ps 
-        assert af_variance_df[af_variance_df['ps']==ps].shape[0]>num_markers_assoc, f"number of genetic features assoc. ({num_markers_assoc}) is too large, only {af_variance_df[af_variance_df['ps']==ps].shape[0]} markers in quartile {ps} group"
-        markers_assoc = af_variance_df[af_variance_df['ps']==ps].sample(n=num_markers_assoc, replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist()
+        # Select SNP group based on g and ps 
+        assert af_variance_df[af_variance_df['ps']==ps].shape[0]>g, f"number of genetic features linked ({g}) is too large, only {af_variance_df[af_variance_df['ps']==ps].shape[0]} markers in quartile {ps} group"
+        markers_assoc = af_variance_df[af_variance_df['ps']==ps].sample(n=g, replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist()
         markers_assoc_dict[genetic_subgroup] = markers_assoc
         assert len(set(markers_assoc))==len(markers_assoc) # make sure ped file has unique rows
 
@@ -159,13 +159,20 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
         # assert they are all ≤ 0.5 (i.e., A1 is the minor allele)
         assert (geno.sum(axis=0) / (2 * geno.shape[0]) <= 0.5).all(), "Some SNPs have A1 frequency > 0.5"
         geno_cols = [col for col in raw.columns if not col in ['FID','IID','PAT','MAT','SEX','PHENOTYPE']]
-        assert len(geno_cols) == num_markers_assoc
+        assert len(geno_cols) == g
         raw[geno_cols] = (raw[geno_cols] > 0).astype(int) # recode s.t. values 1 and 2 map to 1
         genetic_subgroup_df = raw.set_index('IID')[geno_cols].sum(axis=1).reset_index(name=f'r')
         genetic_subgroup_df['genetic_subgroup'] = genetic_subgroup
         genetic_subgroup_df[f'subgroup'] =genetic_subgroup_df['r']>genetic_subgroup_df['r'].quantile(0.8) # Top 20% of people per r
         genetic_subgroups.append(genetic_subgroup_df)
     genetic_subgroups = pd.concat(genetic_subgroups)
+    # remove overlapping samples in genetic subgroups 0 and 1
+    mask = genetic_subgroups['subgroup'] & genetic_subgroups['genetic_subgroup'].isin([0, 1])
+    overlap_iids = (genetic_subgroups.loc[mask]
+                  .groupby('IID')['genetic_subgroup']
+                  .nunique()
+                  .pipe(lambda s: s[s > 1]).index)
+    genetic_subgroups = genetic_subgroups[~genetic_subgroups['IID'].isin(overlap_iids)].copy()
 
     # 3. Generate phenotypic subgroups
     fam_df = pd.read_csv(f'{bfile_path}.fam',sep='\s+',header=None)
@@ -187,6 +194,14 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
         phenotypic_subgroup_df['subgroup'] = phenotypic_subgroup_df['IID'].isin(randomly_selected)
         phenotypic_subgroups.append(phenotypic_subgroup_df)
     phenotypic_subgroups = pd.concat(phenotypic_subgroups)
+    # remove overlapping samples in phenotypic subgroups 0 and 1
+    mask = phenotypic_subgroups['subgroup'] & phenotypic_subgroups['phenotypic_subgroup'].isin([0, 1])
+    overlap_iids = (phenotypic_subgroups.loc[mask]
+                  .groupby('IID')['phenotypic_subgroup']
+                  .nunique()
+                  .pipe(lambda s: s[s > 1]).index)
+    phenotypic_subgroups = phenotypic_subgroups[~phenotypic_subgroups['IID'].isin(overlap_iids)].copy()
+    iid_order = [i for i in iid_order if i not in overlap_iids]
 
     # 4. simulate M binary clinical features
     # start with baseline probabiliyies
@@ -246,14 +261,14 @@ def generate_umap_plot(mode, var_list, color_col, color_label, output_dir, graph
     plot_dfs = []
     for var in var_list:
         if mode == 'ps':
-            output_file_suffix = get_output_file_suffix(ps=var,e=0.5,init=0,num_markers_assoc=100) # choose first initialization and 100 markers assoc for vis purposes
+            output_file_suffix = get_output_file_suffix(ps=var,e=0.5,dataset=0,g=100) # choose first dataset and 100 markers assoc for vis purposes
             with open(f"{output_dir}/simulation_metadata_{output_file_suffix}.pkl", "rb") as f:
                 simulation_metadata = pickle.load(f)
             iid_order = simulation_metadata['iid_order']
             color_df = read_in_igsr_samples(igsr_samples_filepath, bfile_path=f'{output_dir}/G')
         else:
             assert mode=='e', "only works with modes ps and e so far"
-            output_file_suffix = get_output_file_suffix(ps=False,e=var,init=0,num_markers_assoc=100) # choose first initialization and 100 markers assoc for vis purposes
+            output_file_suffix = get_output_file_suffix(ps=False,e=var,dataset=0,g=100) # choose first dataset and 100 markers assoc for vis purposes
             with open(f"{output_dir}/simulation_metadata_{output_file_suffix}.pkl", "rb") as f:
                 simulation_metadata = pickle.load(f)
             iid_order = simulation_metadata['iid_order']
@@ -310,7 +325,7 @@ def generate_phenotype_file(simulation_metadata_path, phenotypic_subgroup, covar
     pheno.drop('FID',axis=1,inplace=True)
     covar_df = pd.read_csv(covar_filepath).drop('FID',axis=1)
     saige_phenoFile = pheno.merge(covar_df,how='inner',on='IID').set_index('IID')
-    assert (set(saige_phenoFile.index) == set(pheno['IID'])) and (set(pheno['IID'])==set(covar_df['IID']))
+    assert (set(saige_phenoFile.index) == set(pheno['IID'])) and (set(pheno['IID'])==set(covar_df[covar_df['IID'].isin(saige_phenoFile.index)]['IID']))
     saige_phenoFile.to_csv(phenotype_file_saige,sep='\t')
 
 # plink gwas
@@ -534,8 +549,8 @@ def run_phenotypicsubgroup_gwas(output_dir,output_file_suffix,intermediate_plink
 
 
 # evaluate gwas
-def evaluate_gwas(output_dir,ps, e, init, num_markers_assoc, phenotypic_subgroup,sig_level=5e-8):
-    output_file_suffix = get_output_file_suffix(ps, e, init, num_markers_assoc)
+def evaluate_gwas(output_dir,ps, e, dataset, g, phenotypic_subgroup,sig_level=5e-8):
+    output_file_suffix = get_output_file_suffix(ps, e, dataset, g)
     meta_path = f"{output_dir}/simulation_metadata_{output_file_suffix}.pkl"
     with open(meta_path, "rb") as f:
         simulation_metadata = pickle.load(f)
@@ -584,8 +599,8 @@ def evaluate_gwas(output_dir,ps, e, init, num_markers_assoc, phenotypic_subgroup
     # set param values
     results_df['ps'] = ps
     results_df['e'] = e
-    results_df['init'] = init
-    results_df['num_markers_assoc'] = num_markers_assoc
+    results_df['dataset'] = dataset
+    results_df['g'] = g
     results_df['phenotypic_subgroup'] = phenotypic_subgroup
 
     return results_df
