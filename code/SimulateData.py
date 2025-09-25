@@ -41,8 +41,8 @@ from simulations.genomes1000_sim import *
 
 # PARAMETERS
 generate_sim = True
-evaluate_sim = True
-run_gwas = True # only will run if run_gwas=True AND evaluate_sim=True
+evaluate_sim = True 
+run_gwas = True  # only will run if run_gwas=True AND evaluate_sim=True 
 # generate all combinations of e and ps variables
 ps_list = [True,False]
 e_list = [0.25, 0.50, 0.75, 1]

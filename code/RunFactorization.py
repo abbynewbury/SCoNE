@@ -35,7 +35,7 @@ intermediate_plink_dir ='/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_p
 intermediate_saige_dir ='/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/intermediate_saige'
 root_dir = '/gpfs/commons/datasets/1000genomes'
 igsr_samples_filepath = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/input/igsr_samples.tsv'
-output_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/output'
+sim_output_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/output'
 admixture_filepath = f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5'
 map_filepath = f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.map'
 code_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/code'
@@ -48,35 +48,33 @@ import evaluation.cluster_evaluation as cluster_evaluation
 import importlib
 
 # PARAMETERS
-generate_sim = True
-evaluate_sim = True
 # generate all combinations of e and ps variables
 ps_list = [True] # TODO: change back to [True,False]
 e_list = [0.75] # TODO: change back to [0.25,0.5,0.75,1]
 g_list = [500] # TODO: change back to [100,500]
-bfile_path=f'{output_dir}/G'
+bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
 rank = 3
-tuning = False # to run sparsity tuning step
+tuning = True # to run sparsity tuning step
 testing = True # to run testing step
 # PARAMETERS
 np.random.seed(42)
 
 # read in G, Z
-igsr_samples = sim_functions.read_in_igsr_samples(igsr_samples_filepath, bfile_path=f'{output_dir}/G')
+igsr_samples = sim_functions.read_in_igsr_samples(igsr_samples_filepath, bfile_path=f'{sim_output_dir}/G')
 igsr_samples['Sex'] = igsr_samples['Sex'].map({'female': 0, 'male': 1})
 
 admixture = pd.read_csv(f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.Q',sep='\s+',header=None)
-fam_df = pd.read_csv(f'{output_dir}/G.fam',sep='\s+',header=None)
+fam_df = pd.read_csv(f'{sim_output_dir}/G.fam',sep='\s+',header=None)
 fam_df.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
 admixture['IID'] = fam_df['IID'].values
 Z_df = admixture.merge(igsr_samples[['IID','Sex']], on='IID',how='inner')
 Z = Z_df[[i for i in Z_df.columns if i!='IID']].to_numpy()
 
-G = np.loadtxt(f'{output_dir}/G.raw',  usecols=range(6, 10000+6), dtype=np.int8, skiprows=1)
+G = np.loadtxt(f'{sim_output_dir}/G.raw',  usecols=range(6, 10000+6), dtype=np.int8, skiprows=1)
 G = (G>0).astype(np.int8)
 # assert that bim_df and G order is the same
-bfile_path = f'{output_dir}/G'
+bfile_path = f'{sim_output_dir}/G'
 bim_df = pd.read_csv(f'{bfile_path}.bim',sep='\s+',header=None,names=['CHR','SNP','CM','POS','A1','A2']).reset_index(drop=True)
 G_columns = [i.split('_')[0] for i in pd.read_csv(f'{bfile_path}.raw',sep='\s+',usecols=range(6, 10000+6),nrows=1).columns]
 assert all(bim_df['SNP'].values==G_columns)
@@ -91,19 +89,26 @@ def run_one_wrapper(ps, e, dataset, g, init,
                     lambda_W, lambda_H_G, lambda_H_C,
                     G_loss_type, C_loss_type,
                     max_outer,min_outer,tol,nonneg,
-                    output_dir, exp_num,run_name,artifact_dir): 
+                    sim_output_dir, exp_num,run_name,artifact_dir): 
     output_suffix = sim_functions.get_output_file_suffix(ps=ps, e=e, dataset=dataset, g=g)
-    C = np.load(f'{output_dir}/C_{output_suffix}.npy')
-    with open(f"{output_dir}/simulation_metadata_{output_suffix}.pkl", "rb") as f:
+    print(f"{sim_output_dir}/simulation_metadata_{output_suffix}.pkl")
+    C = np.load(f'{sim_output_dir}/C_{output_suffix}.npy')
+    with open(f"{sim_output_dir}/simulation_metadata_{output_suffix}.pkl", "rb") as f:
         simulation_metadata = pickle.load(f)
-    ground_truth = {"W":(simulation_metadata['phenotypic_subgroups'].pivot(index='IID',columns='phenotypic_subgroup',values='subgroup')
-          .reindex(simulation_metadata['iid_order']).to_numpy().astype(int))}
+    fam_df = pd.read_csv(f'{bfile_path}.fam',sep='\s+',header=None)
+    fam_df.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
+    iid_index = fam_df[fam_df['IID'].isin(simulation_metadata['iid_order'])].index # some samples removed due to overlap btwn subgroups, need correct length
+    # Note: first two columns are genetically-informed subgroups by construction
+    W_true = (simulation_metadata['phenotypic_subgroups'].pivot(index='IID',columns='phenotypic_subgroup',values='subgroup')
+            .reindex(simulation_metadata['iid_order']).iloc[:,:2].to_numpy().astype(int))
+    other_col = ((W_true.sum(axis=1) == 0).astype(int)).reshape(-1, 1)
+    ground_truth = {"W":np.hstack([W_true, other_col])}
 
-    return MLFlowWrapper.train_with_mlflow(
+    return MLFlowWrapper.train_with_mlflow( 
         algorithm_func=SCoNE.alternating_opt,
         artifact_dir=artifact_dir,
         run_name=run_name,
-        algorithm_func_kwargs={"G":G, "C":C, "Z":Z, "W":W, "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C,
+        algorithm_func_kwargs={"G":G[iid_index,:], "C":C, "Z":Z[iid_index,:], "W":W[iid_index,:], "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C,
                                "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C,
                                "method":'L-BFGS-B', "options":{'maxcor':10,'maxiter':10,'gtol':1e-5,'maxls':5,'ftol':1e-6},  # keep scipy methods and options fixed
                                "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
@@ -126,7 +131,7 @@ exp_map = {}
 tuning_dataset = {}
 for i, (ps, e, g) in enumerate(product(ps_list, e_list, g_list)):
     key = (ps, e, g)
-    tuning_dataset[key] = np.random.randint(0, 101)
+    tuning_dataset[key] = np.random.randint(0, 11)
     exp_map[key] = i
     
 
@@ -166,7 +171,7 @@ if tuning:
             G=G, Z=Z if run_name != 'sHNMF' else np.zeros((Z.shape[0],Z.shape[1])), W=W, H_G=H_G, H_C=H_C, U_G=U_G, U_C=U_C,
             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,
             max_outer=50, min_outer=5, tol=1e-6, nonneg=True,
-            output_dir=output_dir, exp_num=exp_map[ps, e, g],
+            sim_output_dir=sim_output_dir, exp_num=exp_map[ps, e, g],
             run_name=run_name,G_loss_type='bce' if run_name!='SCoNE(Fro)' else 'fro', C_loss_type='kl_div' if run_name!='SCoNE(Fro)' else 'fro',
             artifact_dir=f"{os.path.dirname(artifact_dir)}/logs_tuning"
         )
@@ -196,7 +201,6 @@ for exp in experiments:
 all_runs = pd.concat(all_runs, ignore_index=True)
 all_runs['params.ps'] = all_runs["params.ps"].map({"True": True, "False": False}).astype("boolean")  # columns you want as bools (nullable)
 all_runs[['params.e','params.g','params.lambda_W','params.lambda_H_G','params.lambda_H_C']]  = all_runs[['params.e','params.g','params.lambda_W','params.lambda_H_G','params.lambda_H_C']].astype("float64") 
-all_runs = all_runs[~((all_runs['params.lambda_W']==0)&(all_runs['params.lambda_H_G']==0)&(all_runs['params.lambda_H_C']==0))].copy() # TODO: can remove later once re-run tuning (Sept. 23 1:38pm)
 all_runs['G_plus_C_loss'] = all_runs['metrics.G_loss'] + all_runs['metrics.C_loss']
 idx = all_runs.groupby(["params.run_name", "params.ps", "params.e", "params.g"])["G_plus_C_loss"].idxmin()
 best = (
@@ -210,10 +214,10 @@ if testing:
     executor = submitit.AutoExecutor(folder=f"{os.path.dirname(artifact_dir)}/slurm_logs")
     executor.update_parameters(
         slurm_job_name="fact-grid",
-        timeout_min=120,
+        timeout_min=180,
         cpus_per_task=1,
         mem_gb=3,
-        slurm_array_parallelism=500,
+        slurm_array_parallelism=200,
         stderr_to_stdout=True,
         slurm_additional_parameters={
             "output": "slurm_logs/%x_%A_%a.out",
@@ -244,7 +248,7 @@ if testing:
             U_C=np.random.random((100, Z.shape[1]))*1e-2+1e-6,
             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,
             max_outer=50, min_outer=5, tol=1e-6, nonneg=True,
-            output_dir=output_dir, exp_num=exp_map[ps, e, g],
+            sim_output_dir=sim_output_dir, exp_num=exp_map[ps, e, g],
             run_name=run_name,G_loss_type='bce' if run_name not in ['SCoNE(Fro)','G-NMF'] else ('fro' if run_name=='SCoNE(Fro)' else None), 
             C_loss_type='kl_div' if run_name not in ['SCoNE(Fro)','C-NMF'] else ('fro' if run_name=='SCoNE(Fro)' else None),
             artifact_dir=f"{os.path.dirname(artifact_dir)}/logs"

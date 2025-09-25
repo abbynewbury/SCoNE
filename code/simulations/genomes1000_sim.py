@@ -177,14 +177,26 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
     # 3. Generate phenotypic subgroups
     fam_df = pd.read_csv(f'{bfile_path}.fam',sep='\s+',header=None)
     fam_df.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
-    iid_order = fam_df['IID'].values
-    phenotypic_subgroups = []
+    iid_order = [i for i in fam_df['IID'].values if i not in overlap_iids]
+    gi_phenotypic_subgroups = []
     for phenotypic_subgroup in range(2): 
         phenotypic_subgroup_df = genetic_subgroups[genetic_subgroups['genetic_subgroup']==phenotypic_subgroup][['IID','r']].copy()
         phenotypic_subgroup_df['phenotypic_subgroup'] = phenotypic_subgroup
         # corresponding genetic subgroup value for r
-        phenotypic_subgroup_df['subgroup'] = phenotypic_subgroup_df['r']*e + streams["noise"].normal(loc=0,scale=0.1*phenotypic_subgroup_df['r'].std(),size=len(phenotypic_subgroup_df)) > (phenotypic_subgroup_df['r'].quantile(0.8))*e
-        phenotypic_subgroups.append(phenotypic_subgroup_df)
+        phenotypic_subgroup_df['subgroup'] = phenotypic_subgroup_df['r']*e + streams["noise"].normal(loc=0,scale=0.1*phenotypic_subgroup_df['r'].std(),size=len(phenotypic_subgroup_df)) > (phenotypic_subgroup_df['r'].quantile(0.75))*e
+        gi_phenotypic_subgroups.append(phenotypic_subgroup_df)
+    gi_phenotypic_subgroups = pd.concat(gi_phenotypic_subgroups)
+    # remove overlapping samples in phenotypic subgroups 0 and 1
+    mask = gi_phenotypic_subgroups['subgroup']
+    overlap_iids = (gi_phenotypic_subgroups.loc[mask]
+                  .groupby('IID')['phenotypic_subgroup']
+                  .nunique()
+                  .pipe(lambda s: s[s > 1]).index)
+    gi_phenotypic_subgroups = gi_phenotypic_subgroups[~gi_phenotypic_subgroups['IID'].isin(overlap_iids)].copy()
+    # remove overlap samples from genetic subgroups and iid order as well
+    genetic_subgroups = genetic_subgroups[~genetic_subgroups['IID'].isin(overlap_iids)].copy()
+    iid_order = [i for i in iid_order if i not in overlap_iids]
+    non_gi_phenotypic_subgroups = []
     for phenotypic_subgroup in range(2,4): 
         # randomly select extra_subgroups_size people
         randomly_selected = pd.Series(iid_order).sample(extra_subgroups_size,random_state=rs(streams,"extra_sub")).values.tolist() 
@@ -192,16 +204,10 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
         phenotypic_subgroup_df['r'] = None
         phenotypic_subgroup_df['phenotypic_subgroup'] = phenotypic_subgroup
         phenotypic_subgroup_df['subgroup'] = phenotypic_subgroup_df['IID'].isin(randomly_selected)
-        phenotypic_subgroups.append(phenotypic_subgroup_df)
-    phenotypic_subgroups = pd.concat(phenotypic_subgroups)
-    # remove overlapping samples in phenotypic subgroups 0 and 1
-    mask = phenotypic_subgroups['subgroup'] & phenotypic_subgroups['phenotypic_subgroup'].isin([0, 1])
-    overlap_iids = (phenotypic_subgroups.loc[mask]
-                  .groupby('IID')['phenotypic_subgroup']
-                  .nunique()
-                  .pipe(lambda s: s[s > 1]).index)
-    phenotypic_subgroups = phenotypic_subgroups[~phenotypic_subgroups['IID'].isin(overlap_iids)].copy()
-    iid_order = [i for i in iid_order if i not in overlap_iids]
+        non_gi_phenotypic_subgroups.append(phenotypic_subgroup_df)
+    non_gi_phenotypic_subgroups = pd.concat(non_gi_phenotypic_subgroups)
+    phenotypic_subgroups = pd.concat([gi_phenotypic_subgroups,non_gi_phenotypic_subgroups])
+
 
     # 4. simulate M binary clinical features
     # start with baseline probabiliyies

@@ -52,6 +52,8 @@ def get_X_hat(W,H,Z,U,loss_type):
         X_hat = np.clip(X_hat, 1e-7, 1 - 1e-7) # clipping for log purposes
     elif loss_type in ['kl_div','fro']:
         X_hat = np.clip(X_hat, 1e-7, np.inf) # clipping for log purposes
+    elif loss_type is None:
+        X_hat = None
     else: assert True == False, f"{loss_type} not a valid loss type, should be one of 'kl_div', 'bce', 'fro'"
     return X_hat
 

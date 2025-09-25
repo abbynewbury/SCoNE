@@ -1,72 +1,77 @@
 from sklearn.metrics import (
-    average_precision_score, roc_auc_score, brier_score_loss,
-    precision_recall_curve, f1_score, precision_score, recall_score, normalized_mutual_info_score
+    normalized_mutual_info_score
 )
-from scipy.optimize import linear_sum_assignment
 import numpy as np
 import pandas as pd
+import pickle
+import fcntl
 
-# For subtype membership
+
+# work on cluster evaluation metrics
+def purity(true,pred):
+    # true and pred should be binary matrices - hard clustering, true should have shape (Nxc), pred should have shape (Nxk)
+    # calcualte N(i,j)
+    overlapping_counts = true.T @ pred
+    return np.sum(np.max(overlapping_counts,axis=0))/true.shape[0]
+
+def entropy(labels):
+    # labels should be a binary matrix with labels as columns
+    prob = labels.sum(axis=0)/labels.shape[0]
+    assert not np.all(prob == 0) 
+    prob = prob[prob>0]
+    en = np.sum((-1)*prob*np.log2(prob))
+    return en
+
+def norm_cond_entropy(true,pred):
+    # true and pred should be binary matrices - hard clustering, true should have shape (Nxc), pred should have shape (Nxk)
+    # represents true conditional on predicted (i.e. H(C|K) if C is true labels and K is predicted labels)
+    # calculate N(i,j)
+    nij = true.T @ pred
+    # calculate N(j)
+    nj = pred.sum(axis=0)
+
+    frac = np.zeros_like(nij, dtype=float)
+    valid = nj > 0                   # only divide where cluster has members
+    frac[:, valid] = nij[:, valid] / nj[valid]
+
+    logfrac = np.zeros_like(frac, dtype=float)
+    mask = frac > 0
+    logfrac[mask] = np.log2(frac[mask])
+
+    terms = nij * logfrac
+    norm_cond_en = -1/(true.shape[0]*np.log2(true.shape[1]))*np.sum(terms)
+    return norm_cond_en
+
+def normalized_mutual_info(true,pred):
+    numerator = 2*(entropy(true) - (np.log2(true.shape[1])*norm_cond_entropy(true,pred))) # using own defn of normalized conditional entropt
+    denominator = entropy(true) + entropy(pred)
+    nmi = numerator/denominator
+    # double check close to sklearn value (will also validate norm_cond_entropy)
+    assert np.isclose(normalized_mutual_info_score(np.argmax(true,axis=1),np.argmax(pred,axis=1)),nmi)
+
+    return nmi
+            
 def compute_sim_metrics(factor_matrices,ground_truth):
     # factor matrices & ground truth should be dict with "W" as key
     W_true = ground_truth["W"]
     W = factor_matrices["W"]
-    # 1) Build similarity matrix S 4xW.shape[1] to designate column of W to subgroup
-    S = np.empty((2, W.shape[1]), dtype=float)
 
-    # i is true subgroup designation, j is
-    for i in range(2): # only let it be one of the genetically informed subgroups which are first two columns of W_true
-        for j in range(W.shape[1]):
-            cos_sim = (np.dot(W_true[:, i],W[:, j]))/(np.linalg.norm(W_true[:, i])*np.linalg.norm(W[:, j]))
-            S[i, j] = cos_sim
-    # assign match up between row and col
-    row_ind, col_ind = linear_sum_assignment(-S)
-    #assert set(np.unique(row_ind)) == {0, 1}, "best matching subgroup is not a genetically informed subgroup"
+    # create hard clusters
+    labels = np.argmax(W, axis=1)
+    binary_W = np.zeros_like(W)
+    binary_W[np.arange(W.shape[0]), labels] = 1
 
+    assert np.all(W_true.sum(axis=1) == 1), "true has rows that are not one-hot"
+    assert np.all(binary_W.sum(axis=1) == 1), "pred has rows that are not one-hot"
 
-    # return results df
-    results = []
-    eps = 1e-12
-    P = W / (W.sum(axis=1, keepdims=True) + eps)
     results = {}
-    for i_true, j_pred in zip(row_ind, col_ind):
-        y = W_true[:, i_true]
-        p = P[:, j_pred]
+    # calculate purity
+    results["purity"] = purity(W_true, binary_W) # 0-1, want values closer to 1
 
-        # Probabilistic metrics (robust to class imbalance)
-        auroc = roc_auc_score(y, p)
-        auprc = average_precision_score(y, p) if y.min() != y.max() else np.nan
-        brier = brier_score_loss(y, p)
+    # calculate normalized conditional entropy
+    results["norm_cond_entropy"] = norm_cond_entropy(W_true,binary_W) # 0-1, want values closer to 0
 
-        # chose best threshold by f1 score
-        # precs, recs, thresh = precision_recall_curve(y, p)
-        # valid = (thresh > 0) & (thresh < 1)
-        # f1_scores = 2 * (precs[:-1][valid] * recs[:-1][valid]) / (precs[:-1][valid] + recs[:-1][valid])
-        # best_idx = np.nanargmax(f1_scores)
-        # best_threshold = thresh[valid][best_idx]
+    # calculate normalized mutual information
+    results["nmi"] = normalized_mutual_info(W_true,binary_W) # 0-1, want values closer to 1
 
-        
-        yhat = (p >= 0.5).astype(int)
-        f1  = f1_score(y, yhat) if y.min() != y.max() else np.nan
-        prec = precision_score(y, yhat, zero_division=0)
-        rec  = recall_score(y, yhat, zero_division=0)
-        nmi = normalized_mutual_info_score(y,yhat)
-
-        
-        results[f"cosine_sim_{i_true}"] = S[i_true, j_pred]
-        results[f"AUROC_{i_true}"] = auroc
-        results[f"AUPRC_{i_true}"] = auprc
-        results[f"Brier_{i_true}"] = brier
-        results[f"F1_{i_true}"] = f1
-        results[f"Precision_{i_true}"] = prec
-        results[f"Recall_{i_true}"] = rec
-        results[f"NMI_{i_true}"] = nmi
-    results['mean_cosine_sim'] = (results[f"cosine_sim_0"] + results[f"cosine_sim_1"])/2
-    results['mean_AUROC'] = (results[f"AUROC_0"] + results[f"AUROC_1"])/2
-    results['mean_AUPRC'] = (results[f"AUPRC_0"] + results[f"AUPRC_1"])/2
-    results['mean_Brier'] = (results[f"Brier_0"] + results[f"Brier_1"])/2
-    results['mean_F1'] = (results[f"F1_0"] + results[f"F1_1"])/2
-    results['mean_Precision'] = (results[f"Precision_0"] + results[f"Precision_1"])/2
-    results['mean_Recall'] = (results[f"Recall_0"] + results[f"Recall_1"])/2
-    results['mean_NMI'] = (results[f"NMI_0"] + results[f"NMI_1"])/2
     return results
