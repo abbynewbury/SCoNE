@@ -223,9 +223,9 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
         subj_ids = phenotypic_subgroups.loc[mask, "IID"].unique()
         # map subject IDs to row indices 
         row_idx = [i for i, iid in enumerate(iid_order) if iid in subj_ids]
-        C[np.ix_(row_idx, assoc_idx[:n1])] = streams["poisson"].poisson(1, size=(len(row_idx), n1))
-        C[np.ix_(row_idx, assoc_idx[n1:n2])] = streams["poisson"].poisson(0.75, size=(len(row_idx), n2-n1))
-        C[np.ix_(row_idx, assoc_idx[n2:])] = streams["poisson"].poisson(0.5, size=(len(row_idx), len(assoc_idx)-n2))
+        C[np.ix_(row_idx, assoc_idx[:n1])] = streams["poisson"].poisson(0.6, size=(len(row_idx), n1))
+        C[np.ix_(row_idx, assoc_idx[n1:n2])] = streams["poisson"].poisson(0.5, size=(len(row_idx), n2-n1))
+        C[np.ix_(row_idx, assoc_idx[n2:])] = streams["poisson"].poisson(0.4, size=(len(row_idx), len(assoc_idx)-n2))
         clinical_assoc_df_rows += [
         {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.6, "indices": assoc_idx[:n1]},
         {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.5, "indices": assoc_idx[n1:n2]},

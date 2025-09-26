@@ -49,7 +49,7 @@ import importlib
 
 # PARAMETERS
 # generate all combinations of e and ps variables
-ps_list = [True] # TODO: change back to [True,False]
+ps_list = [True,False] # TODO: change back to [True,False]
 e_list = [0.75] # TODO: change back to [0.25,0.5,0.75,1]
 g_list = [500] # TODO: change back to [100,500]
 bfile_path=f'{sim_output_dir}/G'
@@ -249,8 +249,8 @@ if testing:
             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,
             max_outer=50, min_outer=5, tol=1e-6, nonneg=True,
             sim_output_dir=sim_output_dir, exp_num=exp_map[ps, e, g],
-            run_name=run_name,G_loss_type='bce' if run_name not in ['SCoNE(Fro)','G-NMF'] else ('fro' if run_name=='SCoNE(Fro)' else None), 
-            C_loss_type='kl_div' if run_name not in ['SCoNE(Fro)','C-NMF'] else ('fro' if run_name=='SCoNE(Fro)' else None),
+            run_name=run_name,G_loss_type='bce' if run_name not in ['SCoNE(Fro)','C-NMF'] else ('fro' if run_name=='SCoNE(Fro)' else None), 
+            C_loss_type='kl_div' if run_name not in ['SCoNE(Fro)','G-NMF'] else ('fro' if run_name=='SCoNE(Fro)' else None),
             artifact_dir=f"{os.path.dirname(artifact_dir)}/logs"
         )
         for i, (ps, e, g, lambda_W, lambda_H_G, lambda_H_C, run_name, init, idx) in enumerate(combos)
