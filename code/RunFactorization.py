@@ -52,6 +52,7 @@ import importlib
 ps_list = [True,False] # TODO: change back to [True,False]
 e_list = [0.75] # TODO: change back to [0.25,0.5,0.75,1]
 g_list = [10] # TODO: change back to [100,500]
+num_markers = 100
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
 rank = 3
@@ -60,7 +61,7 @@ testing = True # to run testing step
 # PARAMETERS
 np.random.seed(42)
 
-# read in G, Z
+# read in Z
 igsr_samples = sim_functions.read_in_igsr_samples(igsr_samples_filepath, bfile_path=f'{sim_output_dir}/G')
 igsr_samples['Sex'] = igsr_samples['Sex'].map({'female': 0, 'male': 1})
 
@@ -71,13 +72,6 @@ admixture['IID'] = fam_df['IID'].values
 Z_df = admixture.merge(igsr_samples[['IID']], on='IID',how='inner') # not including covar Sex
 Z = Z_df[[i for i in Z_df.columns if i!='IID']].to_numpy()
 
-G = np.loadtxt(f'{sim_output_dir}/G.raw',  usecols=range(6, 1000+6), dtype=np.int8, skiprows=1) # TODO: switch back to 10k
-# G = (G>0).astype(np.int8). - binarize
-# assert that bim_df and G order is the same
-bfile_path = f'{sim_output_dir}/G'
-bim_df = pd.read_csv(f'{bfile_path}.bim',sep='\s+',header=None,names=['CHR','SNP','CM','POS','A1','A2']).reset_index(drop=True)
-G_columns = [i.split('_')[0] for i in pd.read_csv(f'{bfile_path}.raw',sep='\s+',usecols=range(6, 1000+6),nrows=1).columns] # TODO: switch back to 10k
-assert all(bim_df['SNP'].values==G_columns)
 
 
 def _call_kwargs(kw):
@@ -98,11 +92,11 @@ def run_one_wrapper(ps, e, dataset, g, init,
     fam_df = pd.read_csv(f'{bfile_path}.fam',sep='\s+',header=None)
     fam_df.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
     iid_index = fam_df[fam_df['IID'].isin(simulation_metadata['iid_order'])].index # some samples removed due to overlap btwn subgroups, need correct length
+    G = np.loadtxt(f'{sim_output_dir}/G_{sim_functions.get_output_file_suffix(ps,e,dataset,g)}.raw',  usecols=range(6, num_markers+6), dtype=np.int8, skiprows=1)
     # Note: first two columns are genetically-informed subgroups by construction
     W_true = (simulation_metadata['phenotypic_subgroups'].pivot(index='IID',columns='phenotypic_subgroup',values='subgroup')
             .reindex(simulation_metadata['iid_order']).iloc[:,:2].to_numpy().astype(int))
-    other_col = ((W_true.sum(axis=1) == 0).astype(int)).reshape(-1, 1)
-    ground_truth = {"W":np.hstack([W_true, other_col])}
+    ground_truth = {"W":W_true}
 
     return MLFlowWrapper.train_with_mlflow( 
         algorithm_func=SCoNE.alternating_opt,
@@ -158,17 +152,17 @@ if tuning:
     for ps, e, g, lW, lHG, lHC, rn in product(
         ps_list, e_list, g_list, [0,0.3,0.5,1],[0,0.3,0.5,1],[0,0.3,0.5,1], ['SCoNE','SCoNE(Fro)','sHNMF']
     ) if (lW, lHG, lHC) != (0, 0, 0)]
-    W = np.random.random((G.shape[0], rank))*1e-2+1e-6 # aorund 0 to 1e-2
-    H_G = np.random.random((G.shape[1], rank))*1e-2+1e-6
-    H_C = np.random.random((100, rank))*1e-2+1e-6 # fixed: 100 clinical vars
-    U_G = np.random.random((G.shape[1], Z.shape[1]))*1e-2+1e-6
-    U_C = np.random.random((100, Z.shape[1]))*1e-2+1e-6
+    W = np.random.uniform(low=0.1,high=1,size=(2504, rank))# aorund 0 to 1e-2
+    H_G = np.random.uniform(low=0.1,high=1,size=(num_markers, rank))
+    H_C = np.random.uniform(low=0.1,high=1,size=(100, rank)) # fixed: 100 clinical vars
+    U_G = np.random.uniform(low=0.1,high=1,size=(num_markers, Z.shape[1]))
+    U_C = np.random.uniform(low=0.1,high=1,size=(100, Z.shape[1]))
 
     cfgs = [
         dict(
             ps=ps, e=e, dataset=tuning_dataset[ps, e, g], g=g,
             init = 0,
-            G=G, Z=Z if run_name != 'sHNMF' else np.zeros((Z.shape[0],Z.shape[1])), W=W, H_G=H_G, H_C=H_C, U_G=U_G, U_C=U_C,
+            Z=Z if run_name != 'sHNMF' else np.zeros((Z.shape[0],Z.shape[1])), W=W, H_G=H_G, H_C=H_C, U_G=U_G, U_C=U_C,
             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,
             max_outer=50, min_outer=5, tol=1e-6, nonneg=True,
             sim_output_dir=sim_output_dir, exp_num=exp_map[ps, e, g],
@@ -246,9 +240,9 @@ if testing:
         dict(
             ps=ps, e=e, dataset=idx, g=g,
             init = init,
-            G=G, Z=Z if run_name not in ['sHNMF','HNMF','G-NMF','C-NMF'] else np.zeros((Z.shape[0],Z.shape[1])), W=np.random.random((G.shape[0], rank))*1e-2+1e-6, 
-            H_G=np.random.random((G.shape[1], rank))*1e-2+1e-6, H_C=np.random.random((100, rank))*1e-2+1e-6, U_G=np.random.random((G.shape[1], Z.shape[1]))*1e-2+1e-6,
-            U_C=np.random.random((100, Z.shape[1]))*1e-2+1e-6,
+            Z=Z if run_name not in ['sHNMF','HNMF','G-NMF','C-NMF'] else np.zeros((Z.shape[0],Z.shape[1])), W=np.random.uniform(low=0.1,high=1,size=(2504, rank)), 
+            H_G=np.random.uniform(low=0.1,high=1,size=(num_markers, rank)), H_C=np.random.uniform(low=0.1,high=1,size=(100, rank)), U_G=np.random.uniform(low=0.1,high=1,size=(num_markers, Z.shape[1])),
+            U_C=np.random.uniform(low=0.1,high=1,size=(100, Z.shape[1])),
             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,
             max_outer=50, min_outer=5, tol=1e-6, nonneg=True,
             sim_output_dir=sim_output_dir, exp_num=exp_map[ps, e, g],

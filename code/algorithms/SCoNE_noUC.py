@@ -1,0 +1,247 @@
+import numpy as np
+from collections import defaultdict
+from scipy.optimize import minimize
+from scipy.special import gammaln
+from utilities import vec2mats, mats2vec, sigmoid
+
+def compute_loss(X,X_hat,loss_type):
+    if loss_type == 'kl_div':
+        return np.sum(-np.multiply(X,np.log(X_hat)) + X_hat + gammaln(X + 1)) # log(X!) can help stabilize
+    elif loss_type == 'bce':
+        E_x = np.ones(X.shape)
+        return np.sum(-np.multiply(X,np.log(X_hat)) - np.multiply(E_x-X,np.log(E_x-X_hat)))
+    elif loss_type == 'fro':
+        return np.dot((X - X_hat).ravel(), (X - X_hat).ravel())
+    elif loss_type is None:
+        return 0
+    else: assert True == False, f"{loss_type} not a valid loss type, should be one of 'kl_div', 'bce', 'fro'"
+
+def compute_jac(sample_matrix, X, X_hat, loss_type, for_W=False):
+    '''
+    This function works to compute the Jacobian (unflattened) given loss type in  'kl_div', 'bce', 'fro'
+    Sample matrix defines the matrix that has N rows, will be W or Z -- helps this function to generalize to jac for H and U
+    for_W should only be used when computing the Jacobian for the W matrix (puts sample matrix on other side/diff dimensions)
+    '''
+    if loss_type == 'kl_div':
+        E_x = np.ones(X.shape)
+        X_tilde = np.divide(X,X_hat)
+        if for_W:
+            GX = (E_x - X_tilde)@sample_matrix
+        else:
+            GX = (sample_matrix.T@(E_x - X_tilde)).T 
+    elif loss_type == 'bce':
+        E_x = np.ones(X.shape)
+        X_tilde = np.divide(X,X_hat)
+        X_bar = np.divide(E_x-X,E_x-X_hat)
+        if for_W:
+            GX = np.multiply(np.multiply(-X_tilde + X_bar,X_hat),E_x - X_hat)@sample_matrix
+        else:
+            GX = (sample_matrix.T@np.multiply(np.multiply(-X_tilde + X_bar,X_hat),E_x - X_hat)).T
+    elif loss_type == 'fro':
+        if for_W:
+            GX = X_hat@sample_matrix
+        else:
+            GX = (sample_matrix.T@X_hat).T
+    else: assert True == False, f"{loss_type} not a valid loss type, should be one of 'kl_div', 'bce', 'fro'"
+    return GX
+
+def get_X_hat(W,H,Z,U,loss_type):
+    if U is None:
+        X_hat = W@H.T
+    else:
+        X_hat = W@H.T + Z@U.T
+    if loss_type == 'bce':
+        X_hat = sigmoid(X_hat)
+        X_hat = np.clip(X_hat, 1e-7, 1 - 1e-7) # clipping for log purposes
+    elif loss_type in ['kl_div','fro']:
+        X_hat = np.clip(X_hat, 1e-7, np.inf) # clipping for log purposes
+    elif loss_type is None:
+        X_hat = None
+    else: assert True == False, f"{loss_type} not a valid loss type, should be one of 'kl_div', 'bce', 'fro'"
+    return X_hat
+
+def total_loss(G, C, Z, W, H_G, H_C, U_G, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type):
+    # define nec. elements
+    if G_loss_type is not None:
+        G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
+        G_loss = compute_loss(G,G_hat,loss_type=G_loss_type)
+    else: G_loss = 0
+    if C_loss_type is not None:
+        C_hat = get_X_hat(W,H_C,Z,None,C_loss_type)
+        C_loss = compute_loss(C,C_hat,loss_type=C_loss_type)
+    else: C_loss = 0
+
+    regularization = lambda_W/2* np.dot(W.ravel(),W.ravel()) +  lambda_H_G/2* np.dot(H_G.ravel(), H_G.ravel()) +  lambda_H_C/2* np.dot(H_C.ravel(), H_C.ravel())
+    if G_loss < 0: assert True == False, f"G_loss with loss type {G_loss_type} negative"
+    if C_loss < 0: assert True == False, f"C_loss with loss type {C_loss_type} negative"
+    f = G_loss + C_loss + regularization 
+    return f, G_loss, C_loss, regularization
+
+
+def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type):
+    # Precompute terms independent of W
+    reg = lambda_H_G/2* np.dot(H_G.ravel(), H_G.ravel()) +  lambda_H_C/2* np.dot(H_C.ravel(), H_C.ravel())
+
+    def fun(x):
+        W = x.reshape(shape, order='F')
+        if G_loss_type is not None:
+            G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
+            G_loss = compute_loss(G,G_hat,G_loss_type)
+            # compute jac
+            GW_wrt_G = compute_jac(H_G, G, G_hat, G_loss_type, for_W=True)
+        else:
+            G_loss = 0
+            GW_wrt_G = np.zeros((W.shape[0],W.shape[1]))
+
+        if C_loss_type is not None:
+            C_hat = get_X_hat(W,H_C,Z,None,C_loss_type)
+            C_loss =  compute_loss(C,C_hat,C_loss_type)
+            # compute jac
+            GW_wrt_C = compute_jac(H_C, C, C_hat, C_loss_type, for_W=True)
+        else:
+            C_loss = 0
+            GW_wrt_C = np.zeros((W.shape[0],W.shape[1]))
+
+        # compute fun
+        f = G_loss + C_loss + lambda_W/2* np.dot(W.ravel(), W.ravel()) + reg 
+
+        # compute jac
+        GW = GW_wrt_G + GW_wrt_C + lambda_W*W
+
+        return f, GW.flatten(order='F')
+    return fun
+
+def make_fg_HG(shape, G, C, Z, W, H_G, H_C, U_G, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type):
+    # Precompute terms independent of H_G
+    C_hat = get_X_hat(W,H_C,Z,None,C_loss_type)
+    C_loss = compute_loss(C,C_hat,C_loss_type)
+    reg = lambda_W/2* np.dot(W.ravel(), W.ravel()) +  lambda_H_C/2* np.dot(H_C.ravel(), H_C.ravel())
+    def fun(x):
+        H_G = x.reshape(shape, order='F')
+        G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type) # could cut down on matrix multiplications if use precalculated Z@U_G.T for fun and jac
+        G_loss = compute_loss(G,G_hat,G_loss_type)
+
+        # compute fun
+        f = G_loss + C_loss + reg +  lambda_H_G/2* np.dot(H_G.ravel(), H_G.ravel())
+
+        # compute jac
+        GH_G = compute_jac(W, G, G_hat, G_loss_type) + lambda_H_G*H_G
+        return f, GH_G.flatten(order='F')
+    return fun
+
+def make_fg_HC(shape, G, C, Z, W, H_G, H_C, U_G, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type):
+    # Precompute terms independent of H_C
+    G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
+    G_loss = compute_loss(G,G_hat,G_loss_type)
+    reg = lambda_W/2* np.dot(W.ravel(), W.ravel()) +  lambda_H_G/2* np.dot(H_G.ravel(), H_G.ravel())
+    def fun(x):
+        H_C = x.reshape(shape, order='F')
+        C_hat = get_X_hat(W,H_C,Z,None,C_loss_type)
+        C_loss = compute_loss(C,C_hat,C_loss_type)
+
+        # compute fun
+        f = G_loss + C_loss + reg +  lambda_H_C/2* np.dot(H_C.ravel(), H_C.ravel())
+
+        # compute jac
+        GH_C = compute_jac(W, C, C_hat, C_loss_type) + lambda_H_C*H_C
+        return f, GH_C.flatten(order='F')
+    return fun
+
+def make_fg_UG(shape, G, C, Z, W, H_G, H_C, U_G, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type):
+    # Precompute terms independent of U_G
+    C_hat = get_X_hat(W,H_C,Z,None,C_loss_type)
+    C_loss = compute_loss(C,C_hat,C_loss_type)
+    regularization = lambda_W/2* np.dot(W.ravel(),W.ravel()) +  lambda_H_G/2* np.dot(H_G.ravel(), H_G.ravel()) +  lambda_H_C/2* np.dot(H_C.ravel(), H_C.ravel())
+    def fun(x):
+        U_G = x.reshape(shape, order='F')
+        G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
+        G_loss =  compute_loss(G,G_hat,G_loss_type)
+
+        # compute fun
+        f = G_loss + C_loss + regularization
+
+        # compute jac
+        GU_G = compute_jac(Z, G, G_hat, G_loss_type)
+        return f, GU_G.flatten(order='F')
+    return fun
+
+
+
+def alternating_opt(
+    G,C,Z,              # true matrices
+    W, H_G, H_C, U_G,  # initializations
+    lambda_W, lambda_H_G, lambda_H_C,                   # regularization parameters
+    method,                 # method and options for scipy minimize
+    options,
+    G_loss_type, C_loss_type, # in 'kl_div', 'bce', 'fro' or None (None indicates not fitting to data, i.e. if G_loss_type=None & C_loss_type='fro then C only optimization)
+    max_outer=30,
+    min_outer=5,
+    tol=1e-4,
+    nonneg=True             # set per-block L-BFGS-B bounds to [0, +inf)
+):
+    '''
+    To remove sparsity (CoNE) - set all lambda = 0
+    To remove covariates Z (HNMF, SHNMF) - set Z = np.zeros((Z.shape[0],Z.shape[1]))
+    To run G only (GNMF)
+    To run C only (CNMF)
+    To run with all Frobenius norm (SCoNE (Fro))
+    '''
+    def one_block_update(name, X, method, options, G_loss_type, C_loss_type):
+        x0 = X.flatten(order='F') 
+        bnds = [(0, None)] * x0.size if nonneg else None
+
+        if name == "W":
+            fun = make_fg_W(W.shape, G, C, Z, W, H_G, H_C, U_G, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type)
+        elif name == "H_G":
+            fun = make_fg_HG(H_G.shape, G, C, Z, W, H_G, H_C, U_G, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type)
+        elif name == "H_C":
+            fun = make_fg_HC(H_C.shape, G, C, Z, W, H_G, H_C, U_G, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type)
+        elif name == "U_G":
+            fun = make_fg_UG(U_G.shape, G, C, Z, W, H_G, H_C, U_G, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type)
+        else:
+            raise ValueError(f"Unknown block {name}")
+        res = minimize(fun, x0, method=method, jac=True, bounds=bnds, options=options)
+        return res.x.reshape(X.shape, order='F')
+
+    # initial objective
+    loss_dict = defaultdict(list)
+    f_prev, G_loss, C_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type)
+
+    for _ in range(max_outer):
+        W   = one_block_update("W",   W, method, options, G_loss_type, C_loss_type)
+        if G_loss_type is not None:
+            H_G = one_block_update("H_G", H_G, method, options, G_loss_type, C_loss_type)
+            U_G = one_block_update("U_G", U_G, method, options, G_loss_type, C_loss_type)
+        if C_loss_type is not None:
+            H_C = one_block_update("H_C", H_C, method, options, G_loss_type, C_loss_type)
+
+        f_cur, G_loss, C_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type)
+        loss_dict['total_loss'].append(f_cur)
+        loss_dict['G_loss'].append(G_loss)
+        loss_dict['C_loss'].append(C_loss)
+        loss_dict['regularization'].append(regularization)
+        
+        # record matrix norms
+        loss_dict['W_norm'].append(np.linalg.norm(W))
+        loss_dict['H_G_norm'].append(np.linalg.norm(H_G))
+        loss_dict['H_C_norm'].append(np.linalg.norm(H_C))
+        loss_dict['U_G_norm'].append(np.linalg.norm(U_G))
+
+        # record sparsity
+        loss_dict['W_sparsity'].append(100*np.count_nonzero(W == 0)/ W.size)
+        loss_dict['H_G_sparsity'].append(100*np.count_nonzero(H_G == 0)/ H_G.size)
+        loss_dict['H_C_sparsity'].append(100*np.count_nonzero(H_C == 0)/ H_C.size)
+        loss_dict['U_G_sparsity'].append(100*np.count_nonzero(U_G == 0)/ U_G.size) # expect to stay fairly constant over time
+        
+        if ((f_prev - f_cur) / max(1.0, abs(f_prev)) < tol) and _ >= min_outer:
+            break
+        f_prev = f_cur
+
+    # Normalize columns of W to L2 norm and scale rows of H to resolve scaling ambiguity
+    norms = np.linalg.norm(W, axis=0)
+    norms[norms == 0] = 1.0
+    W = W / norms
+    # scale rows of H_G and H_C
+    H_G = H_G * norms[np.newaxis, :]
+    H_C = H_C * norms[np.newaxis, :]
+    return {"W":W, "H_G":H_G, "H_C":H_C, "U_G":U_G}, loss_dict

@@ -36,13 +36,13 @@ def prep_1000genomes_bed_file(root_dir, output,subset_test=False):
     '''
     result = subprocess.run(plink_extract, shell=True, check=True, executable="/bin/bash") # TODO: change back to 10,000
 
-    # make .raw file for G matrix later
-    plink_extract = f'''
-    module load plink/1.9 && plink --bfile {output} \
-        --recode A \
-        --out {output}
-    '''
-    result = subprocess.run(plink_extract, shell=True, check=True, executable="/bin/bash")
+    # # make .raw file for G matrix later
+    # plink_extract = f'''
+    # module load plink/1.9 && plink --bfile {output} \
+    #     --recode A \
+    #     --out {output}
+    # '''
+    # result = subprocess.run(plink_extract, shell=True, check=True, executable="/bin/bash")
 
 def read_in_igsr_samples(igsr_samples_filepath,bfile_path=None):
     # read in, subset to 2504, order correctly (if bfile path is not None)
@@ -86,7 +86,7 @@ def rs(streams,stream_name):
 
 def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_filepath,
                           intermediate_file_dir,intermediate_file_suffix,output_dir,output_file_suffix,
-                          ps,g,e,extra_subgroups_size,M,num_clinical_assoc, run_seed):
+                          ps,g,e,extra_subgroups_size,M,num_clinical_assoc,num_markers, run_seed):
     '''
     Generate synthetic data similar to Sun et al. (Multi-view biclustering for genotype-phenotype association studies of complex diseases)
     using 1000 Genomes Phase 3 data. Use admixture files which contain 193634 markers with MAF>5% and 2504 individuals. 
@@ -107,6 +107,7 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
     e: relative effect that genetic variation contributed to the effect of the phenotype. e in [0,1]. (decreased e means higher level of disagreement between genotypic and phenotypic subgroups)
     num_clinical_assoc: number of clinical features associated with subtype classification (same for all subtypes)
     extra_subgroups_size: number of people in s3 and s4 (selected at random)
+    num_markers: total number of markers (i.e. G.shape[1]])
     run_seed: seed for run for reproducibility
 
     outputs:
@@ -151,7 +152,6 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
         markers_assoc_dict[genetic_subgroup] = markers_assoc
         assert len(set(markers_assoc))==len(markers_assoc) # make sure ped file has unique rows
 
-        
         # extract selected markers
         with open(f'{intermediate_file_dir}/markers_assoc_g{genetic_subgroup}_{intermediate_file_suffix}.txt','w') as f:
             for snp in markers_assoc:
@@ -189,6 +189,29 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
                   .pipe(lambda s: s[s > 1]).index)
     genetic_subgroups = genetic_subgroups[~genetic_subgroups['IID'].isin(overlap_iids)].copy()
 
+    # select num_markers-markers assoc extra markers for analysis (G)
+    all_markers_assoc = set(sum(markers_assoc_dict.values(), []))
+    extra_markers = (maf_by_superpop[(maf_by_superpop['ps']==ps)&(~maf_by_superpop['SNP'].isin(all_markers_assoc))]
+                    .sample(n=num_markers-len(all_markers_assoc), replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist())
+    assert len(all_markers_assoc) + len(extra_markers) == num_markers
+    # extract all markers
+    with open(f'{intermediate_file_dir}/allmarkers_{intermediate_file_suffix}.txt','w') as f:
+        for snp in extra_markers:
+            f.write(snp + "\n")
+        for snp in all_markers_assoc:
+            f.write(snp + "\n")
+    
+    # extract all markers
+    plink_extract = f'''
+    module load plink/1.9 && plink --bfile {bfile_path} \
+        --extract {intermediate_file_dir}/allmarkers_{intermediate_file_suffix}.txt \
+        --make-bed \
+        --recode A \
+        --out {output_dir}/G_{intermediate_file_suffix}
+    '''
+    result = subprocess.run(plink_extract, shell=True, check=True, executable="/bin/bash")
+
+
     # 3. Generate phenotypic subgroups
     fam_df = pd.read_csv(f'{bfile_path}.fam',sep='\s+',header=None)
     fam_df.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
@@ -200,7 +223,7 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
         phenotypic_subgroup_df = phenotypic_subgroup_df.merge(igsr_samples[['IID','Superpopulation code']],on='IID',how='inner')
         # corresponding genetic subgroup value for r
         if ps:
-            phenotypic_subgroup_df['superpop_shift'] = phenotypic_subgroup_df['Superpopulation code'].map({sp: streams["ps_noise"].uniform(-0.1, 0.1) for sp in phenotypic_subgroup_df['Superpopulation code'].unique()})
+            phenotypic_subgroup_df['superpop_shift'] = phenotypic_subgroup_df['Superpopulation code'].map({sp: streams["ps_noise"].uniform(-0.05, 0.05) for sp in phenotypic_subgroup_df['Superpopulation code'].unique()})
         else:
             phenotypic_subgroup_df['superpop_shift'] = 0
         phenotypic_subgroup_df['subgroup'] = phenotypic_subgroup_df['z']*e + streams["env_noise"].normal(loc=0,scale=0.1,size=phenotypic_subgroup_df.shape[0]) + phenotypic_subgroup_df["superpop_shift"]> 0.842*e
@@ -230,8 +253,19 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
 
 
     # 4. simulate M binary clinical features
-    # start with baseline probabiliyies
-    C = streams["poisson"].poisson(0.1,(len(iid_order), M)) # baseline prob of clinical feature is 0.1 
+    # start with baseline probabilities
+    if ps:
+        sp2bump = {sp: streams["ps_noise"].uniform(-0.05, 0.05)
+            for sp in igsr_samples['Superpopulation code'].unique()}
+        subj_bump = (igsr_samples
+                    .set_index('IID')['Superpopulation code']
+                    .reindex(iid_order).map(sp2bump).to_numpy())  # shape (n,)
+    else: 
+        subj_bump = np.zeros(len(iid_order), dtype=float) 
+    clip01 = lambda x: np.clip(x, 1e-6, 0.999)
+
+    # baseline (add ps bump, broadcast across M)
+    C = streams["poisson"].poisson(clip01(0.1 + subj_bump)[:, None], size=(len(iid_order), M))
     clinical_assoc_df_rows = [] # index of clinical vars that are associated (and their strength)
     for phenotypic_subgroup in range(4):
         # index of randomly chosen, associated clinical variables 
@@ -243,9 +277,10 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
         subj_ids = phenotypic_subgroups.loc[mask, "IID"].unique()
         # map subject IDs to row indices 
         row_idx = [i for i, iid in enumerate(iid_order) if iid in subj_ids]
-        C[np.ix_(row_idx, assoc_idx[:n1])] = streams["poisson"].poisson(0.6, size=(len(row_idx), n1))
-        C[np.ix_(row_idx, assoc_idx[n1:n2])] = streams["poisson"].poisson(0.5, size=(len(row_idx), n2-n1))
-        C[np.ix_(row_idx, assoc_idx[n2:])] = streams["poisson"].poisson(0.4, size=(len(row_idx), len(assoc_idx)-n2))
+        b = subj_bump[row_idx][:, None] # per subject bump from population structure
+        C[np.ix_(row_idx, assoc_idx[:n1])] = streams["poisson"].poisson(clip01(0.6+b), size=(len(row_idx), n1))
+        C[np.ix_(row_idx, assoc_idx[n1:n2])] = streams["poisson"].poisson(clip01(0.5+b), size=(len(row_idx), n2-n1))
+        C[np.ix_(row_idx, assoc_idx[n2:])] = streams["poisson"].poisson(clip01(0.4+b), size=(len(row_idx), len(assoc_idx)-n2))
         clinical_assoc_df_rows += [
         {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.6, "indices": assoc_idx[:n1]},
         {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.5, "indices": assoc_idx[n1:n2]},

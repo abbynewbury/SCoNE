@@ -56,7 +56,7 @@ dataset_list = range(11) # 11 random datasets for each combination
 if generate_sim:
     # RUN FILE SETUP
     # generate genetic bfile (outputs to {output_dir}/G)
-    prep_1000genomes_bed_file(root_dir=root_dir, output=f'{output_dir}/G',subset_test=True) # if subset_test is true - only use 10k snps for faster processing
+    prep_1000genomes_bed_file(root_dir=root_dir, output=f'{output_dir}/G',subset_test=False) # if subset_test is true - only use 10k snps for faster processing
     # calculate maf by superpopulation
     maf_by_superpop = calculate_maf_by_superpop(igsr_samples_filepath,intermediate_plink_dir,bfile_path=f'{output_dir}/G',output=maf_by_superpop_filepath)
     # RUN FILE SETUP
