@@ -56,7 +56,7 @@ num_markers = 100
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
 rank = 3
-tuning = True # to run sparsity tuning step
+tuning = False # to run sparsity tuning step
 testing = True # to run testing step
 # PARAMETERS
 np.random.seed(42)
@@ -188,7 +188,7 @@ if tuning:
 
 if testing:
     testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF']
-    if ['SCoNE','SCoNE(Fro)','sHNMF'] in testing_runs:
+    if any(x in testing_runs for x in ['SCoNE','SCoNE(Fro)','sHNMF']):
 
         # STEP 2: find optimal sparsity parameters for each method
         mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/logs_tuning")
