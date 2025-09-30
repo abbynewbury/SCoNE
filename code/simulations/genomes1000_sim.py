@@ -525,7 +525,7 @@ def run_saige(plinkFile,phenoFile,intermediate_saige_dir,output_dir,phenotypic_s
     GMMATmodelFile = f'{intermediate_saige_dir}/{out_suffix}.rda'
     varianceRatioFile = f'{intermediate_saige_dir}/{out_suffix}.varianceRatio.txt'
     # runs for each chr then consolidates into out file
-    submit_step2_job(bfile=f'{output_dir}/G', GMMATmodelFile=GMMATmodelFile, varianceRatioFile=varianceRatioFile,
+    submit_step2_job(bfile=f'{output_dir}/G_{output_file_suffix}', GMMATmodelFile=GMMATmodelFile, varianceRatioFile=varianceRatioFile,
                     intermediate_saige_dir=intermediate_saige_dir, 
                       out=f'{output_dir}/GWAS_RESULTS/{out_suffix}')
 
@@ -572,7 +572,9 @@ def run_phenotypicsubgroup_gwas(output_dir,output_file_suffix,intermediate_plink
     '''
     Runs PLINK and SAIGE GWAS and outputs to parquet file
     '''
-
+    # split plink bfile by chr (for SAIGE LOCO)
+    split_plink_bfile(f'{output_dir}/G_{output_file_suffix}')
+    
     # write phenotype file
     phenotype_file_plink=f'{intermediate_plink_dir}/PHENOTYPE_FILE_Subgroup{phenotypic_subgroup}_{output_file_suffix}'
     phenotype_file_saige=f'{intermediate_saige_dir}/PHENOTYPE_FILE_Subgroup{phenotypic_subgroup}_{output_file_suffix}'
@@ -582,22 +584,22 @@ def run_phenotypicsubgroup_gwas(output_dir,output_file_suffix,intermediate_plink
                     phenotype_file_saige=phenotype_file_saige)
 
     # run PLINK GWAS (no covariates)
-    run_plink_gwas(bfile=f'{output_dir}/G', covariate_file=None, phenotype_file=phenotype_file_plink, 
+    run_plink_gwas(bfile=f'{output_dir}/G_{output_file_suffix}', covariate_file=None, phenotype_file=phenotype_file_plink, 
                    out=f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_False')
 
     # run PLINK GWAS (with age and pcs)
-    run_plink_gwas(bfile=f'{output_dir}/G', covariate_file=f'{output_dir}/COVARIATE_FILE', phenotype_file=phenotype_file_plink, 
+    run_plink_gwas(bfile=f'{output_dir}/G_{output_file_suffix}', covariate_file=f'{output_dir}/COVARIATE_FILE', phenotype_file=phenotype_file_plink, 
                    out=f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_True')
 
     # run SAIGE GWAS (with age and pcs)
     # check bim df is sorted before running saige gwas
-    bim_df =  pd.read_csv(f'{output_dir}/G.bim',sep='\s+',header=None,names=['CHR','SNP','CM','POS','A1','A2'])
+    bim_df =  pd.read_csv(f'{output_dir}/_{output_file_suffix}.bim',sep='\s+',header=None,names=['CHR','SNP','CM','POS','A1','A2'])
     assert (bim_df['CHR'].diff().fillna(0) >= 0).all(), "CHR not sorted"
     assert all(
         (group['POS'].diff().fillna(0) >= 0).all()
         for _, group in bim_df.groupby('CHR')
     ), "POS not sorted within at least one chromosome"
-    run_saige(plinkFile=f'{output_dir}/G',phenoFile=phenotype_file_saige,output_dir=output_dir,
+    run_saige(plinkFile=f'{output_dir}/G_{output_file_suffix}',phenoFile=phenotype_file_saige,output_dir=output_dir,
               intermediate_saige_dir=intermediate_saige_dir,
               phenotypic_subgroup=phenotypic_subgroup,output_file_suffix=output_file_suffix)
     

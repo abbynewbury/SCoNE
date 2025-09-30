@@ -73,7 +73,8 @@ if generate_sim:
         output_dir=output_dir,
         extra_subgroups_size=200,
         M=100,
-        num_clinical_assoc=10
+        num_clinical_assoc=10,
+        num_markers=100
     )
 
     results = Parallel(n_jobs=-1)(
@@ -111,8 +112,6 @@ if evaluate_sim:
         # probably cleaner way to do this
         covar[['FID','IID']+[f'PC{i}' for i in range(1,11)]+['Sex']].set_index('FID').to_csv(f'{output_dir}/COVARIATE_FILE')
 
-        # split plink bfile by chr (for SAIGE LOCO)
-        split_plink_bfile(f'{output_dir}/G')
 
         # run gwas phenotypic subgroup ~ genotypes + age + pcs (plink w/out covs, plink w/ covs, saige w/ covs)
         run_one = partial(
