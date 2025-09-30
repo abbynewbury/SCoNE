@@ -49,8 +49,8 @@ import importlib
 
 # PARAMETERS
 # generate all combinations of e and ps variables
-ps_list = [True,False] # TODO: change back to [True,False]
-e_list = [0.75] # TODO: change back to [0.25,0.5,0.75,1]
+ps_list = [True,False]
+e_list = [0.25,0.5,0.75,1] 
 g_list = [10] 
 num_markers = 100
 bfile_path=f'{sim_output_dir}/G'
@@ -187,8 +187,7 @@ if tuning:
     print(f"[{t1:%Y-%m-%d %H:%M:%S %Z}] now running… elapsed={t1 - t0}", flush=True)
 
 if testing:
-    #testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE']
-    testing_runs = ['SCoNE','SCoNE(Fro)','sHNMF']
+    testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF']
     if ['SCoNE','SCoNE(Fro)','sHNMF'] in testing_runs:
 
         # STEP 2: find optimal sparsity parameters for each method
