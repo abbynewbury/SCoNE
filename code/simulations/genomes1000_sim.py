@@ -255,7 +255,7 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
     # 4. simulate M binary clinical features
     # start with baseline probabilities
     if ps:
-        sp2bump = {sp: streams["ps_noise"].uniform(-0.05, 0.05)
+        sp2bump = {sp: streams["ps_noise"].uniform(-0.1, 0.1)
             for sp in igsr_samples['Superpopulation code'].unique()}
         subj_bump = (igsr_samples
                     .set_index('IID')['Superpopulation code']
@@ -322,14 +322,14 @@ def generate_umap_plot(mode, var_list, color_col, color_label, output_dir, graph
     plot_dfs = []
     for var in var_list:
         if mode == 'ps':
-            output_file_suffix = get_output_file_suffix(ps=var,e=0.5,dataset=0,g=100) # choose first dataset and 100 markers assoc for vis purposes
+            output_file_suffix = get_output_file_suffix(ps=var,e=0.5,dataset=0,g=10) # choose first dataset and 10 markers assoc for vis purposes
             with open(f"{output_dir}/simulation_metadata_{output_file_suffix}.pkl", "rb") as f:
                 simulation_metadata = pickle.load(f)
             iid_order = simulation_metadata['iid_order']
             color_df = read_in_igsr_samples(igsr_samples_filepath, bfile_path=f'{output_dir}/G')
         else:
             assert mode=='e', "only works with modes ps and e so far"
-            output_file_suffix = get_output_file_suffix(ps=False,e=var,dataset=0,g=100) # choose first dataset and 100 markers assoc for vis purposes
+            output_file_suffix = get_output_file_suffix(ps=True,e=var,dataset=0,g=10) # choose first dataset and 10 markers assoc for vis purposes
             with open(f"{output_dir}/simulation_metadata_{output_file_suffix}.pkl", "rb") as f:
                 simulation_metadata = pickle.load(f)
             iid_order = simulation_metadata['iid_order']

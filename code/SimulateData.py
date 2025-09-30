@@ -1,7 +1,7 @@
 #! /gpfs/commons/home/anewbury/miniconda/envs/jupyter/bin/python3
 #SBATCH --job-name=SimulateData
 #SBATCH --nodes=1
-#SBATCH --mem=50G
+#SBATCH --mem=30G
 #SBATCH --cpus-per-task=24
 #SBATCH --time=120:00:00
 #SBATCH --mail-type=ALL
@@ -41,7 +41,7 @@ from simulations.genomes1000_sim import *
 
 # PARAMETERS
 generate_sim = True
-evaluate_sim = False 
+evaluate_sim = True 
 run_gwas = False  # only will run if run_gwas=True AND evaluate_sim=True 
 # generate all combinations of e and ps variables
 ps_list = [True,False]

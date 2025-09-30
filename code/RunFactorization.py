@@ -51,12 +51,12 @@ import importlib
 # generate all combinations of e and ps variables
 ps_list = [True,False] # TODO: change back to [True,False]
 e_list = [0.75] # TODO: change back to [0.25,0.5,0.75,1]
-g_list = [10] # TODO: change back to [100,500]
+g_list = [10] 
 num_markers = 100
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
 rank = 3
-tuning = False # to run sparsity tuning step
+tuning = True # to run sparsity tuning step
 testing = True # to run testing step
 # PARAMETERS
 np.random.seed(42)
@@ -78,7 +78,7 @@ def _call_kwargs(kw):
     return run_one_wrapper(**kw)  # expands kwargs dict
 
 def run_one_wrapper(ps, e, dataset, g, init,
-                    G, Z,
+                    Z,
                     W, H_G, H_C, U_G, U_C,
                     lambda_W, lambda_H_G, lambda_H_C,
                     G_loss_type, C_loss_type,
@@ -92,7 +92,11 @@ def run_one_wrapper(ps, e, dataset, g, init,
     fam_df = pd.read_csv(f'{bfile_path}.fam',sep='\s+',header=None)
     fam_df.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
     iid_index = fam_df[fam_df['IID'].isin(simulation_metadata['iid_order'])].index # some samples removed due to overlap btwn subgroups, need correct length
+    # read in G with num_markers
     G = np.loadtxt(f'{sim_output_dir}/G_{sim_functions.get_output_file_suffix(ps,e,dataset,g)}.raw',  usecols=range(6, num_markers+6), dtype=np.int8, skiprows=1)
+    fam_df_subset = pd.read_csv(f'{sim_output_dir}/G_{sim_functions.get_output_file_suffix(ps,e,dataset,g)}.fam',sep='\s+',header=None)
+    fam_df_subset.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
+    assert all(fam_df_subset['IID'].values == fam_df['IID'].values)
     # Note: first two columns are genetically-informed subgroups by construction
     W_true = (simulation_metadata['phenotypic_subgroups'].pivot(index='IID',columns='phenotypic_subgroup',values='subgroup')
             .reindex(simulation_metadata['iid_order']).iloc[:,:2].to_numpy().astype(int))
@@ -183,7 +187,8 @@ if tuning:
     print(f"[{t1:%Y-%m-%d %H:%M:%S %Z}] now running… elapsed={t1 - t0}", flush=True)
 
 if testing:
-    testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE']
+    #testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE']
+    testing_runs = ['SCoNE','SCoNE(Fro)','sHNMF']
     if ['SCoNE','SCoNE(Fro)','sHNMF'] in testing_runs:
 
         # STEP 2: find optimal sparsity parameters for each method
