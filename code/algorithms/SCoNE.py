@@ -216,7 +216,6 @@ def alternating_opt(
             fun = make_fg_UC(U_C.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type)
         else:
             raise ValueError(f"Unknown block {name}")
-
         res = minimize(fun, x0, method=method, jac=True, bounds=bnds, options=options)
         return res.x.reshape(X.shape, order='F')
 

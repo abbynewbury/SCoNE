@@ -41,12 +41,12 @@ from simulations.genomes1000_sim import *
 
 # PARAMETERS
 generate_sim = True
-evaluate_sim = True 
-run_gwas = True  # only will run if run_gwas=True AND evaluate_sim=True 
+evaluate_sim = False 
+run_gwas = False  # only will run if run_gwas=True AND evaluate_sim=True 
 # generate all combinations of e and ps variables
 ps_list = [True,False]
 e_list = [0.25, 0.50, 0.75, 1]
-g_list = [100,500] # g represents the number of linked markers
+g_list = [10] # g represents the number of linked markers
 dataset_list = range(11) # 11 random datasets for each combination
 # PARAMETERS
 
@@ -57,6 +57,8 @@ if generate_sim:
     # RUN FILE SETUP
     # generate genetic bfile (outputs to {output_dir}/G)
     prep_1000genomes_bed_file(root_dir=root_dir, output=f'{output_dir}/G',subset_test=True) # if subset_test is true - only use 10k snps for faster processing
+    # calculate maf by superpopulation
+    maf_by_superpop = calculate_maf_by_superpop(igsr_samples_filepath,intermediate_plink_dir,bfile_path=f'{output_dir}/G',output=maf_by_superpop_filepath)
     # RUN FILE SETUP
     
     combos = list(product(ps_list, e_list, dataset_list, g_list))
@@ -65,8 +67,8 @@ if generate_sim:
     # run with 500 or 100 associated markers, 11 random datasets each
     run_one = partial(
         sun_generate_sim_data,
-        bfile_path=f'{output_dir}/G', af_df_filepath=admixture_filepath,
-        map_filepath = map_filepath,
+        bfile_path=f'{output_dir}/G', maf_by_superpop_filepath=f'{intermediate_plink_dir}/maf_by_superpop.frq.strat',
+        igsr_samples_filepath = igsr_samples_filepath,
         intermediate_file_dir=intermediate_plink_dir,
         output_dir=output_dir,
         extra_subgroups_size=200,

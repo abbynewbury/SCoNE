@@ -51,11 +51,11 @@ import importlib
 # generate all combinations of e and ps variables
 ps_list = [True,False] # TODO: change back to [True,False]
 e_list = [0.75] # TODO: change back to [0.25,0.5,0.75,1]
-g_list = [500] # TODO: change back to [100,500]
+g_list = [10] # TODO: change back to [100,500]
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
 rank = 3
-tuning = True # to run sparsity tuning step
+tuning = False # to run sparsity tuning step
 testing = True # to run testing step
 # PARAMETERS
 np.random.seed(42)
@@ -68,15 +68,15 @@ admixture = pd.read_csv(f'{root_dir}/release-20130502-supporting/admixture_files
 fam_df = pd.read_csv(f'{sim_output_dir}/G.fam',sep='\s+',header=None)
 fam_df.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
 admixture['IID'] = fam_df['IID'].values
-Z_df = admixture.merge(igsr_samples[['IID','Sex']], on='IID',how='inner')
+Z_df = admixture.merge(igsr_samples[['IID']], on='IID',how='inner') # not including covar Sex
 Z = Z_df[[i for i in Z_df.columns if i!='IID']].to_numpy()
 
-G = np.loadtxt(f'{sim_output_dir}/G.raw',  usecols=range(6, 10000+6), dtype=np.int8, skiprows=1)
-G = (G>0).astype(np.int8)
+G = np.loadtxt(f'{sim_output_dir}/G.raw',  usecols=range(6, 1000+6), dtype=np.int8, skiprows=1) # TODO: switch back to 10k
+# G = (G>0).astype(np.int8). - binarize
 # assert that bim_df and G order is the same
 bfile_path = f'{sim_output_dir}/G'
 bim_df = pd.read_csv(f'{bfile_path}.bim',sep='\s+',header=None,names=['CHR','SNP','CM','POS','A1','A2']).reset_index(drop=True)
-G_columns = [i.split('_')[0] for i in pd.read_csv(f'{bfile_path}.raw',sep='\s+',usecols=range(6, 10000+6),nrows=1).columns]
+G_columns = [i.split('_')[0] for i in pd.read_csv(f'{bfile_path}.raw',sep='\s+',usecols=range(6, 1000+6),nrows=1).columns] # TODO: switch back to 10k
 assert all(bim_df['SNP'].values==G_columns)
 
 
@@ -172,7 +172,7 @@ if tuning:
             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,
             max_outer=50, min_outer=5, tol=1e-6, nonneg=True,
             sim_output_dir=sim_output_dir, exp_num=exp_map[ps, e, g],
-            run_name=run_name,G_loss_type='bce' if run_name!='SCoNE(Fro)' else 'fro', C_loss_type='kl_div' if run_name!='SCoNE(Fro)' else 'fro',
+            run_name=run_name,G_loss_type='kl_div' if run_name!='SCoNE(Fro)' else 'fro', C_loss_type='kl_div' if run_name!='SCoNE(Fro)' else 'fro',
             artifact_dir=f"{os.path.dirname(artifact_dir)}/logs_tuning"
         )
         for i, (ps, e, g, lambda_W, lambda_H_G, lambda_H_C, run_name) in enumerate(combos)
@@ -188,28 +188,31 @@ if tuning:
     t1 = datetime.now(ZoneInfo("America/New_York"))
     print(f"[{t1:%Y-%m-%d %H:%M:%S %Z}] now running… elapsed={t1 - t0}", flush=True)
 
-
-# STEP 2: find optimal sparsity parameters for each method
-mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/logs_tuning")
-client = MlflowClient()
-# Get all experiments
-experiments = client.search_experiments()
-all_runs = []
-for exp in experiments:
-    df = mlflow.search_runs([exp.experiment_id])
-    all_runs.append(df)
-all_runs = pd.concat(all_runs, ignore_index=True)
-all_runs['params.ps'] = all_runs["params.ps"].map({"True": True, "False": False}).astype("boolean")  # columns you want as bools (nullable)
-all_runs[['params.e','params.g','params.lambda_W','params.lambda_H_G','params.lambda_H_C']]  = all_runs[['params.e','params.g','params.lambda_W','params.lambda_H_G','params.lambda_H_C']].astype("float64") 
-all_runs['G_plus_C_loss'] = all_runs['metrics.G_loss'] + all_runs['metrics.C_loss']
-idx = all_runs.groupby(["params.run_name", "params.ps", "params.e", "params.g"])["G_plus_C_loss"].idxmin()
-best = (
-    all_runs.loc[idx, all_runs.columns]
-      .sort_values(["params.run_name", "params.ps", "params.e", "params.g"])
-      .reset_index(drop=True)
-)
-# STEP 3: testing/comparison over 10 other datasets for each experiment
 if testing:
+    testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE']
+    if ['SCoNE','SCoNE(Fro)','sHNMF'] in testing_runs:
+
+        # STEP 2: find optimal sparsity parameters for each method
+        mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/logs_tuning")
+        client = MlflowClient()
+        # Get all experiments
+        experiments = client.search_experiments()
+        all_runs = []
+        for exp in experiments:
+            df = mlflow.search_runs([exp.experiment_id])
+            all_runs.append(df)
+        all_runs = pd.concat(all_runs, ignore_index=True)
+        all_runs['params.ps'] = all_runs["params.ps"].map({"True": True, "False": False}).astype("boolean")  # columns you want as bools (nullable)
+        all_runs[['params.e','params.g','params.lambda_W','params.lambda_H_G','params.lambda_H_C']]  = all_runs[['params.e','params.g','params.lambda_W','params.lambda_H_G','params.lambda_H_C']].astype("float64") 
+        all_runs['G_plus_C_loss'] = all_runs['metrics.G_loss'] + all_runs['metrics.C_loss']
+        idx = all_runs.groupby(["params.run_name", "params.ps", "params.e", "params.g"])["G_plus_C_loss"].idxmin()
+        best = (
+            all_runs.loc[idx, all_runs.columns]
+            .sort_values(["params.run_name", "params.ps", "params.e", "params.g"])
+            .reset_index(drop=True)
+        )
+
+    # STEP 3: testing/comparison over 10 other datasets for each experiment
     # submit as a SLURM array (adjust params as needed)
     executor = submitit.AutoExecutor(folder=f"{os.path.dirname(artifact_dir)}/slurm_logs")
     executor.update_parameters(
@@ -230,7 +233,7 @@ if testing:
     for ps, e, g in product(ps_list, e_list, g_list):
         tune_idx = tuning_dataset[ps, e, g]
         other_idx = [i for i in range(11) if i != tune_idx]
-        for run_name in ['SCoNE','SCoNE(Fro)','sHNMF','HNMF','CoNE','G-NMF','C-NMF']:
+        for run_name in testing_runs:
             if run_name in ['SCoNE','SCoNE(Fro)','sHNMF']:
                 matching_best_run = best[(best['params.run_name']==run_name)&(best['params.ps']==ps)&(best['params.e']==e)&(best['params.g']==g)].copy()
                 assert matching_best_run.shape[0] == 1
@@ -243,14 +246,14 @@ if testing:
         dict(
             ps=ps, e=e, dataset=idx, g=g,
             init = init,
-            G=G, Z=Z if 'NMF' not in run_name else np.zeros((Z.shape[0],Z.shape[1])), W=np.random.random((G.shape[0], rank))*1e-2+1e-6, 
+            G=G, Z=Z if run_name not in ['sHNMF','HNMF','G-NMF','C-NMF'] else np.zeros((Z.shape[0],Z.shape[1])), W=np.random.random((G.shape[0], rank))*1e-2+1e-6, 
             H_G=np.random.random((G.shape[1], rank))*1e-2+1e-6, H_C=np.random.random((100, rank))*1e-2+1e-6, U_G=np.random.random((G.shape[1], Z.shape[1]))*1e-2+1e-6,
             U_C=np.random.random((100, Z.shape[1]))*1e-2+1e-6,
             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,
             max_outer=50, min_outer=5, tol=1e-6, nonneg=True,
             sim_output_dir=sim_output_dir, exp_num=exp_map[ps, e, g],
-            run_name=run_name,G_loss_type='bce' if run_name not in ['SCoNE(Fro)','C-NMF'] else ('fro' if run_name=='SCoNE(Fro)' else None), 
-            C_loss_type='kl_div' if run_name not in ['SCoNE(Fro)','G-NMF'] else ('fro' if run_name=='SCoNE(Fro)' else None),
+            run_name=run_name,G_loss_type='kl_div' if run_name not in ['SCoNE(Fro)','C-NMF','C-CoNE'] else ('fro' if run_name=='SCoNE(Fro)' else None), 
+            C_loss_type='kl_div' if run_name not in ['SCoNE(Fro)','G-NMF','G-CoNE'] else ('fro' if run_name=='SCoNE(Fro)' else None),
             artifact_dir=f"{os.path.dirname(artifact_dir)}/logs"
         )
         for i, (ps, e, g, lambda_W, lambda_H_G, lambda_H_C, run_name, init, idx) in enumerate(combos)

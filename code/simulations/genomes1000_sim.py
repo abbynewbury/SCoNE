@@ -30,11 +30,11 @@ def prep_1000genomes_bed_file(root_dir, output,subset_test=False):
     # major allele set to A2 (If a binary fileset was originally loaded, --keep-allele-order forces the original A1/A2 allele encoding to be preserved; otherwise, the major allele is set to A2)
     plink_extract = f'''
     module load plink/1.9 && plink --file {root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05 \
-        {"--thin-count 10000 --seed 42" if subset_test else ""}\
+        {"--thin-count 1000 --seed 42" if subset_test else ""}\
         --make-bed \
         --out {output}
     '''
-    result = subprocess.run(plink_extract, shell=True, check=True, executable="/bin/bash")
+    result = subprocess.run(plink_extract, shell=True, check=True, executable="/bin/bash") # TODO: change back to 10,000
 
     # make .raw file for G matrix later
     plink_extract = f'''
@@ -61,6 +61,22 @@ def read_in_igsr_samples(igsr_samples_filepath,bfile_path=None):
 
     return igsr_samples
 
+def calculate_maf_by_superpop(igsr_samples_filepath,intermediate_file_dir,bfile_path,output):
+      # Calculate allele frequencies in five superpopulations
+      # generate superpopulation cluster file
+      igsr_samples = read_in_igsr_samples(igsr_samples_filepath,bfile_path)
+      igsr_samples[['FID','IID','Superpopulation code']].to_csv(f'{intermediate_file_dir}/superpop.clst',index=False,header=False,sep='\t')
+      # calculate maf by superpop
+      plink_freq = f''' module load plink/1.9 && 
+      plink --bfile {bfile_path} \
+            --freq \
+            --within {intermediate_file_dir}/superpop.clst \
+            --out {output}
+      '''
+      result = subprocess.run(plink_freq, shell=True, check=True, executable="/bin/bash")
+
+      maf_by_superpop = pd.read_csv(f'{intermediate_file_dir}/maf_by_superpop.frq.strat',sep='\s+')
+      return maf_by_superpop
 
 def get_output_file_suffix(ps,e,dataset,g):
     return f'ps_{ps}_e_{e}_dataset_{dataset}_g_{g}'
@@ -68,7 +84,7 @@ def get_output_file_suffix(ps,e,dataset,g):
 def rs(streams,stream_name):
         return int(streams[stream_name].integers(1, 2**31 - 1))
 
-def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
+def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_filepath,
                           intermediate_file_dir,intermediate_file_suffix,output_dir,output_file_suffix,
                           ps,g,e,extra_subgroups_size,M,num_clinical_assoc, run_seed):
     '''
@@ -77,8 +93,8 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
 
     PARAMS:
     bfile_path: path to bfile for genetic data
-    af_df_filepath: pre-generated admixture fractions for K=5 (release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5)
-    map_filepath: map file corresponding to admixture fraction file creation (release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.map)
+    maf_by_superpop_filepath: pre-generated plink frq.strat file -- af stratified by superpopulation (from function calculate_maf_by_superpop)
+    igsr_samples_filepath: filepath corresponding to igsr samples data on superpopulation (downloaded from https://www.internationalgenome.org/data-portal/sample on 08/20/25)
     admixture_fractions_filepath: path
     intermediate_file_dir: dir to write intermediate files to (when using plink for example)
     intermediate_file_suffix: such that if multiple simulations are created, each is distinctly defined
@@ -105,35 +121,33 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
     '''
     assert num_clinical_assoc<M, "num_clinical_assoc cannot exceed M"
     parent_ss = np.random.SeedSequence(run_seed)
-    names = ["markers", "noise", "extra_sub", "assoc", "poisson"]
+    names = ["markers", "env_noise", "ps_noise", "extra_sub", "assoc", "poisson"]
     streams = {name: np.random.default_rng(ss) for name, ss in zip(names, parent_ss.spawn(len(names)))}
 
-    # 1. Read in allele frequencies per 5 admixture fractions to estimate af variance across groups
-    assert ps in [True,False], f"{ps} is not a valid value for ps, must be in [True,False]" 
-    af_variance_df = pd.read_csv(f'{af_df_filepath}.P',header=None,sep='\s+')
-    # get marker id
-    df_map = pd.read_csv(map_filepath,sep='\s+',header=None,names=["chrom", "SNP", "cm", "bp"])
-    af_variance_df['SNP'] = df_map['SNP'].values
-    # make sure af variance df and bim df have same snps (incase of subsetting)
-    bim_df = pd.read_csv(f'{bfile_path}.bim',sep='\s+',header=None,names=['CHR','SNP','CM','POS','A1','A2'])
-    af_variance_df = af_variance_df.merge(bim_df[['SNP']], on='SNP', how='inner')
-    admixture_indiv_df = pd.read_csv(f'{af_df_filepath}.Q',header=None,sep='\s+')
+    # 1. Read in allele frequencies per 5 superpopulations to estimate af variance across groups
+    maf_by_superpop = pd.read_csv(maf_by_superpop_filepath,sep='\s+')
+    superpopulations = maf_by_superpop['CLST'].unique()
+    maf_by_superpop = maf_by_superpop.pivot(index=['SNP'],columns='CLST',values='MAF').reset_index()
+    igsr_samples = read_in_igsr_samples(igsr_samples_filepath,bfile_path)
 
-    X = af_variance_df.iloc[:, 0:5].to_numpy(float)      # N x 5
-    w = admixture_indiv_df.mean(axis=0).to_numpy(float)  # length 5
+    # calculate weighted af variance
+    w = igsr_samples['Superpopulation code'].value_counts().to_numpy(float)
+    w_code_index = igsr_samples['Superpopulation code'].value_counts().index
+    X = maf_by_superpop[w_code_index].to_numpy(float)  
+    
     w = w / w.sum()
     mu = X @ w                                           # (N,)
-    af_variance_df['af_variance_weighted'] = ((X - mu[:, None])**2 * w[None, :]).sum(axis=1)
-    af_variance_df['af_var_quartile'] = (pd.qcut(af_variance_df['af_variance_weighted'], 4, labels=[0.00, 0.25, 0.50, 0.75]))
-    af_variance_df['ps'] = af_variance_df['af_var_quartile'].map({0.00: False, 0.75: True})
+    maf_by_superpop['af_variance_weighted'] = ((X - mu[:, None])**2 * w[None, :]).sum(axis=1)
+    maf_by_superpop['af_var_quartile'] = (pd.qcut(maf_by_superpop['af_variance_weighted'], 4, labels=[0.00, 0.25, 0.50, 0.75]))
+    maf_by_superpop['ps'] = maf_by_superpop['af_var_quartile'].map({0.00: False, 0.75: True})
 
     # 2. Generate genetic subgroups
     genetic_subgroups = []
     markers_assoc_dict = {} # names of the markers that are associated with each subgroup
     for genetic_subgroup in range(2):
         # Select SNP group based on g and ps 
-        assert af_variance_df[af_variance_df['ps']==ps].shape[0]>g, f"number of genetic features linked ({g}) is too large, only {af_variance_df[af_variance_df['ps']==ps].shape[0]} markers in quartile {ps} group"
-        markers_assoc = af_variance_df[af_variance_df['ps']==ps].sample(n=g, replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist()
+        assert maf_by_superpop[maf_by_superpop['ps']==ps].shape[0]>g, f"number of genetic features linked ({g}) is too large, only {maf_by_superpop[maf_by_superpop['ps']==ps].shape[0]} markers in quartile {ps} group"
+        markers_assoc = maf_by_superpop[maf_by_superpop['ps']==ps].sample(n=g, replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist()
         markers_assoc_dict[genetic_subgroup] = markers_assoc
         assert len(set(markers_assoc))==len(markers_assoc) # make sure ped file has unique rows
 
@@ -160,10 +174,11 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
         assert (geno.sum(axis=0) / (2 * geno.shape[0]) <= 0.5).all(), "Some SNPs have A1 frequency > 0.5"
         geno_cols = [col for col in raw.columns if not col in ['FID','IID','PAT','MAT','SEX','PHENOTYPE']]
         assert len(geno_cols) == g
-        raw[geno_cols] = (raw[geno_cols] > 0).astype(int) # recode s.t. values 1 and 2 map to 1
+        #raw[geno_cols] = (raw[geno_cols] > 0).astype(int) # recode s.t. values 1 and 2 map to 1 - keep columns in 0/1/2
         genetic_subgroup_df = raw.set_index('IID')[geno_cols].sum(axis=1).reset_index(name=f'r')
         genetic_subgroup_df['genetic_subgroup'] = genetic_subgroup
-        genetic_subgroup_df[f'subgroup'] =genetic_subgroup_df['r']>genetic_subgroup_df['r'].quantile(0.8) # Top 20% of people per r
+        genetic_subgroup_df["z"] = (genetic_subgroup_df["r"] - genetic_subgroup_df["r"].mean()) / genetic_subgroup_df["r"].std(ddof=0)
+        genetic_subgroup_df[f'subgroup'] = genetic_subgroup_df['z']> 0.842 # ~ Top 10% of people per r
         genetic_subgroups.append(genetic_subgroup_df)
     genetic_subgroups = pd.concat(genetic_subgroups)
     # remove overlapping samples in genetic subgroups 0 and 1
@@ -180,10 +195,15 @@ def sun_generate_sim_data(bfile_path, af_df_filepath,map_filepath,
     iid_order = [i for i in fam_df['IID'].values if i not in overlap_iids]
     gi_phenotypic_subgroups = []
     for phenotypic_subgroup in range(2): 
-        phenotypic_subgroup_df = genetic_subgroups[genetic_subgroups['genetic_subgroup']==phenotypic_subgroup][['IID','r']].copy()
+        phenotypic_subgroup_df = genetic_subgroups[genetic_subgroups['genetic_subgroup']==phenotypic_subgroup][['IID','z']].copy()
         phenotypic_subgroup_df['phenotypic_subgroup'] = phenotypic_subgroup
+        phenotypic_subgroup_df = phenotypic_subgroup_df.merge(igsr_samples[['IID','Superpopulation code']],on='IID',how='inner')
         # corresponding genetic subgroup value for r
-        phenotypic_subgroup_df['subgroup'] = phenotypic_subgroup_df['r']*e + streams["noise"].normal(loc=0,scale=0.1*phenotypic_subgroup_df['r'].std(),size=len(phenotypic_subgroup_df)) > (phenotypic_subgroup_df['r'].quantile(0.75))*e
+        if ps:
+            phenotypic_subgroup_df['superpop_shift'] = phenotypic_subgroup_df['Superpopulation code'].map({sp: streams["ps_noise"].uniform(-0.1, 0.1) for sp in phenotypic_subgroup_df['Superpopulation code'].unique()})
+        else:
+            phenotypic_subgroup_df['superpop_shift'] = 0
+        phenotypic_subgroup_df['subgroup'] = phenotypic_subgroup_df['z']*e + streams["env_noise"].normal(loc=0,scale=0.1,size=phenotypic_subgroup_df.shape[0]) + phenotypic_subgroup_df["superpop_shift"]> 0.842*e
         gi_phenotypic_subgroups.append(phenotypic_subgroup_df)
     gi_phenotypic_subgroups = pd.concat(gi_phenotypic_subgroups)
     # remove overlapping samples in phenotypic subgroups 0 and 1
