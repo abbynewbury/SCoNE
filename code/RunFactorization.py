@@ -52,11 +52,12 @@ import importlib
 ps_list = [True,False]
 e_list = [0.25,0.5,0.75,1] 
 g_list = [10] 
+dataset_list = range(11) # 11 random datasets for each combination
 num_markers = 100
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
 rank = 3
-tuning = False # to run sparsity tuning step
+tuning = True # to run sparsity tuning step
 testing = True # to run testing step
 # PARAMETERS
 np.random.seed(42)
@@ -230,7 +231,7 @@ if testing:
     combos = []
     for ps, e, g in product(ps_list, e_list, g_list):
         tune_idx = tuning_dataset[ps, e, g]
-        other_idx = [i for i in range(11) if i != tune_idx]
+        other_idx = [i for i in dataset_list if i != tune_idx]
         for run_name in testing_runs:
             if run_name in ['SCoNE','SCoNE(Fro)','sHNMF']:
                 matching_best_run = best[(best['params.run_name']==run_name)&(best['params.ps']==ps)&(best['params.e']==e)&(best['params.g']==g)].copy()

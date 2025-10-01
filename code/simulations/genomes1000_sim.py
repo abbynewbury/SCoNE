@@ -9,6 +9,9 @@ import glob
 import pickle
 import time
 from sklearn.preprocessing import StandardScaler
+import sys
+from pathlib import Path
+import re
 
 def get_genetic_pcs(map_ped_filepath,output_dir,ndim=20):
     # make map/ped file into bfile
@@ -419,13 +422,25 @@ def run_plink_gwas(bfile, covariate_file, phenotype_file, out):
     os.remove(f'{out}.Phenotype.glm.logistic.hybrid')
 
 # saige gwas
-def split_plink_bfile(bfile):
+def split_plink_bfile(bfile,out_path):
     for chr in range(1,23):
         result = subprocess.run(f'''module load plink/1.9 && plink --bfile {bfile} \
           --chr {chr} \
           --make-bed \
-          --out {bfile}_{chr}''', shell=True, capture_output=True, text=True, executable='/bin/bash')
-        result.check_returncode()
+          --out {out_path}_{chr}''', shell=True, capture_output=True, text=True, executable='/bin/bash')
+        if result.returncode != 0:
+            msg = (result.stdout + result.stderr).lower()
+            # tolerate common "no variants" phrasings from PLINK
+            no_var = any(s in msg for s in [
+                "all variants excluded", "no valid variants", "all variants removed", "contains zero variants"
+            ])
+            if no_var:
+                print(f"chr {chr}: no variants; skipping")
+                [os.remove(f) for f in glob.glob(f"{out_path}_{chr}*")]
+                continue
+            # otherwise, surface the error
+            sys.stderr.write(result.stderr)
+            raise subprocess.CalledProcessError(result.returncode, "plink split bfile", output=result.stdout, stderr=result.stderr)
 
 # step 1: run null GRM for each phenotype
 def run_step1(plinkFile, phenoFile, out):
@@ -458,8 +473,13 @@ def active_count(job_ids):
 
 def submit_step2_job(bfile, GMMATmodelFile, varianceRatioFile, intermediate_saige_dir, out):
     # run association tests LOCO
+    chrs = sorted({
+        int(m.group(1))
+        for p in Path(bfile).parent.glob(Path(bfile).name + "_*")
+        if (m := re.match(rf"{re.escape(Path(bfile).name)}_(\d+)", p.name))
+    }) # only run on chrs where there is a snp for assoc. testing
     job_ids = []
-    for chr in range(1,23):
+    for chr in chrs:
         while active_count(job_ids) >= 5:
             time.sleep(30)
         job_name = f"{os.path.basename(out)}_chr_{chr}"
@@ -502,7 +522,7 @@ Rscript $(echo $CMAKE_PREFIX_PATH | tr ':' '\n' | grep R/4.3.3)/SAIGE/extdata/st
 
     # consolidate saige results
     saige_results = []
-    for chr in range(1,23):
+    for chr in chrs:
         saige_chr_results = pd.read_csv(f'{out}_chr_{chr}',sep='\t')
         saige_results.append(saige_chr_results)
     saige_results = pd.concat(saige_results)
@@ -520,14 +540,22 @@ def run_saige(plinkFile,phenoFile,intermediate_saige_dir,output_dir,phenotypic_s
     out_suffix = f'PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_SAIGE'
     run_step1(plinkFile=plinkFile, phenoFile=phenoFile,
               out=f'{intermediate_saige_dir}/{out_suffix}')
+    
+    # split plink bfile by chr (for SAIGE LOCO)
+    split_plink_bfile(f'{output_dir}/G_{output_file_suffix}',f'{intermediate_saige_dir}/G_{output_file_suffix}')
 
     # run association tests LOCO
     GMMATmodelFile = f'{intermediate_saige_dir}/{out_suffix}.rda'
     varianceRatioFile = f'{intermediate_saige_dir}/{out_suffix}.varianceRatio.txt'
     # runs for each chr then consolidates into out file
-    submit_step2_job(bfile=f'{output_dir}/G_{output_file_suffix}', GMMATmodelFile=GMMATmodelFile, varianceRatioFile=varianceRatioFile,
+    submit_step2_job(bfile=f'{intermediate_saige_dir}/G_{output_file_suffix}', GMMATmodelFile=GMMATmodelFile, varianceRatioFile=varianceRatioFile,
                     intermediate_saige_dir=intermediate_saige_dir, 
                       out=f'{output_dir}/GWAS_RESULTS/{out_suffix}')
+
+    # make sure ran assoc. testing on all desired snps
+    bim_df = pd.read_csv(f'{output_dir}/G_{output_file_suffix}.bim',sep='\s+',header=None,names=['CHR','SNP','CM','POS','A1','A2']).reset_index(drop=True)
+    saige_results = pd.read_csv(f'{output_dir}/GWAS_RESULTS/{out_suffix}')
+    assert set(bim_df['SNP'].values) == set(saige_results['MarkerID'].values), f'bim df snps != saige assoc. test snps for saige {output_dir}/GWAS_RESULTS/{out_suffix}; bim {output_dir}/G_{output_file_suffix}'
 
 def consolidate_files(plink_nocovs_filepath, plink_covs_filepath, saige_filepath, out):
     # merge all into one long format parquet
@@ -572,8 +600,6 @@ def run_phenotypicsubgroup_gwas(output_dir,output_file_suffix,intermediate_plink
     '''
     Runs PLINK and SAIGE GWAS and outputs to parquet file
     '''
-    # split plink bfile by chr (for SAIGE LOCO)
-    split_plink_bfile(f'{output_dir}/G_{output_file_suffix}')
     
     # write phenotype file
     phenotype_file_plink=f'{intermediate_plink_dir}/PHENOTYPE_FILE_Subgroup{phenotypic_subgroup}_{output_file_suffix}'
@@ -592,14 +618,14 @@ def run_phenotypicsubgroup_gwas(output_dir,output_file_suffix,intermediate_plink
                    out=f'{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}_Geno_Cov_True')
 
     # run SAIGE GWAS (with age and pcs)
-    # check bim df is sorted before running saige gwas
-    bim_df =  pd.read_csv(f'{output_dir}/_{output_file_suffix}.bim',sep='\s+',header=None,names=['CHR','SNP','CM','POS','A1','A2'])
+    # check both bim df is sorted before running saige gwas
+    bim_df =  pd.read_csv(f'{output_dir}/G_{output_file_suffix}.bim',sep='\s+',header=None,names=['CHR','SNP','CM','POS','A1','A2'])
     assert (bim_df['CHR'].diff().fillna(0) >= 0).all(), "CHR not sorted"
     assert all(
         (group['POS'].diff().fillna(0) >= 0).all()
         for _, group in bim_df.groupby('CHR')
     ), "POS not sorted within at least one chromosome"
-    run_saige(plinkFile=f'{output_dir}/G_{output_file_suffix}',phenoFile=phenotype_file_saige,output_dir=output_dir,
+    run_saige(plinkFile=f'{output_dir}/G',phenoFile=phenotype_file_saige,output_dir=output_dir,
               intermediate_saige_dir=intermediate_saige_dir,
               phenotypic_subgroup=phenotypic_subgroup,output_file_suffix=output_file_suffix)
     
