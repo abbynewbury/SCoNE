@@ -64,7 +64,7 @@ if generate_sim:
     combos = list(product(ps_list, e_list, dataset_list, g_list))
     child_ss = np.random.SeedSequence().spawn(len(combos)) 
     run_seeds = [int(np.random.default_rng(ss).integers(1, 2**31 - 1)) for ss in child_ss] # for reproducible randomness
-    # run with 500 or 100 associated markers, 11 random datasets each
+    # 11 random datasets each
     run_one = partial(
         sun_generate_sim_data,
         bfile_path=f'{output_dir}/G', maf_by_superpop_filepath=f'{intermediate_plink_dir}/maf_by_superpop.frq.strat',

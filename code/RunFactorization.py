@@ -57,7 +57,7 @@ num_markers = 100
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
 rank = 3
-tuning = True # to run sparsity tuning step
+tuning = False # to run sparsity tuning step
 testing = True # to run testing step
 # PARAMETERS
 np.random.seed(42)
@@ -108,7 +108,7 @@ def run_one_wrapper(ps, e, dataset, g, init,
         artifact_dir=artifact_dir,
         run_name=run_name,
         algorithm_func_kwargs={"G":G[iid_index,:], "C":C, "Z":Z[iid_index,:], "W":W[iid_index,:], "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C,
-                               "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C,
+                               "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C,"lambda_Gloss":1,
                                "method":'L-BFGS-B', "options":{'maxcor':10,'maxiter':10,'gtol':1e-5,'maxls':5,'ftol':1e-6},  # keep scipy methods and options fixed
                                "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
                                "max_outer":max_outer, "min_outer":min_outer, "tol":tol, "nonneg":nonneg},

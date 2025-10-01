@@ -11,7 +11,7 @@ def compute_loss(X,X_hat,loss_type):
         E_x = np.ones(X.shape)
         return np.sum(-np.multiply(X,np.log(X_hat)) - np.multiply(E_x-X,np.log(E_x-X_hat)))
     elif loss_type == 'fro':
-        return np.dot((X - X_hat).ravel(), (X - X_hat).ravel())
+        return (1/2)*np.dot((X - X_hat).ravel(), (X - X_hat).ravel())
     elif loss_type is None:
         return 0
     else: assert True == False, f"{loss_type} not a valid loss type, should be one of 'kl_div', 'bce', 'fro'"
@@ -57,7 +57,7 @@ def get_X_hat(W,H,Z,U,loss_type):
     else: assert True == False, f"{loss_type} not a valid loss type, should be one of 'kl_div', 'bce', 'fro'"
     return X_hat
 
-def total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type):
+def total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type):
     # define nec. elements
     if G_loss_type is not None:
         G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
@@ -71,11 +71,11 @@ def total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C,
     regularization = lambda_W/2* np.dot(W.ravel(),W.ravel()) +  lambda_H_G/2* np.dot(H_G.ravel(), H_G.ravel()) +  lambda_H_C/2* np.dot(H_C.ravel(), H_C.ravel())
     if G_loss < 0: assert True == False, f"G_loss with loss type {G_loss_type} negative"
     if C_loss < 0: assert True == False, f"C_loss with loss type {C_loss_type} negative"
-    f = G_loss + C_loss + regularization 
-    return f, G_loss, C_loss, regularization
+    f = lambda_Gloss*G_loss + C_loss + regularization 
+    return f, lambda_Gloss*G_loss, C_loss, regularization
 
 
-def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type):
+def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type):
     # Precompute terms independent of W
     reg = lambda_H_G/2* np.dot(H_G.ravel(), H_G.ravel()) +  lambda_H_C/2* np.dot(H_C.ravel(), H_C.ravel())
 
@@ -100,15 +100,15 @@ def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambd
             GW_wrt_C = np.zeros((W.shape[0],W.shape[1]))
 
         # compute fun
-        f = G_loss + C_loss + lambda_W/2* np.dot(W.ravel(), W.ravel()) + reg 
+        f = lambda_Gloss*G_loss + C_loss + lambda_W/2* np.dot(W.ravel(), W.ravel()) + reg 
 
         # compute jac
-        GW = GW_wrt_G + GW_wrt_C + lambda_W*W
+        GW = lambda_Gloss*GW_wrt_G + GW_wrt_C + lambda_W*W
 
         return f, GW.flatten(order='F')
     return fun
 
-def make_fg_HG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type):
+def make_fg_HG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type):
     # Precompute terms independent of H_G
     C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type)
     C_loss = compute_loss(C,C_hat,C_loss_type)
@@ -119,14 +119,14 @@ def make_fg_HG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lamb
         G_loss = compute_loss(G,G_hat,G_loss_type)
 
         # compute fun
-        f = G_loss + C_loss + reg +  lambda_H_G/2* np.dot(H_G.ravel(), H_G.ravel())
+        f = lambda_Gloss*G_loss + C_loss + reg +  lambda_H_G/2* np.dot(H_G.ravel(), H_G.ravel())
 
         # compute jac
-        GH_G = compute_jac(W, G, G_hat, G_loss_type) + lambda_H_G*H_G
+        GH_G = lambda_Gloss*compute_jac(W, G, G_hat, G_loss_type) + lambda_H_G*H_G
         return f, GH_G.flatten(order='F')
     return fun
 
-def make_fg_HC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type):
+def make_fg_HC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type):
     # Precompute terms independent of H_C
     G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
     G_loss = compute_loss(G,G_hat,G_loss_type)
@@ -137,14 +137,14 @@ def make_fg_HC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lamb
         C_loss = compute_loss(C,C_hat,C_loss_type)
 
         # compute fun
-        f = G_loss + C_loss + reg +  lambda_H_C/2* np.dot(H_C.ravel(), H_C.ravel())
+        f = lambda_Gloss*G_loss + C_loss + reg +  lambda_H_C/2* np.dot(H_C.ravel(), H_C.ravel())
 
         # compute jac
         GH_C = compute_jac(W, C, C_hat, C_loss_type) + lambda_H_C*H_C
         return f, GH_C.flatten(order='F')
     return fun
 
-def make_fg_UG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type):
+def make_fg_UG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type):
     # Precompute terms independent of U_G
     C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type)
     C_loss = compute_loss(C,C_hat,C_loss_type)
@@ -155,14 +155,14 @@ def make_fg_UG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lamb
         G_loss =  compute_loss(G,G_hat,G_loss_type)
 
         # compute fun
-        f = G_loss + C_loss + regularization
+        f = lambda_Gloss*G_loss + C_loss + regularization
 
         # compute jac
-        GU_G = compute_jac(Z, G, G_hat, G_loss_type)
+        GU_G = lambda_Gloss*compute_jac(Z, G, G_hat, G_loss_type)
         return f, GU_G.flatten(order='F')
     return fun
 
-def make_fg_UC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type):
+def make_fg_UC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type):
     # Precompute terms independent of U_C
     G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
     G_loss = compute_loss(G,G_hat,G_loss_type)
@@ -173,7 +173,7 @@ def make_fg_UC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lamb
         C_loss = compute_loss(C,C_hat,C_loss_type)
 
         # compute fun
-        f = G_loss + C_loss + regularization
+        f = lambda_Gloss*G_loss + C_loss + regularization
 
         # compute jac
         GU_C = compute_jac(Z, C, C_hat, C_loss_type)
@@ -184,7 +184,7 @@ def make_fg_UC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lamb
 def alternating_opt(
     G,C,Z,              # true matrices
     W, H_G, H_C, U_G, U_C,  # initializations
-    lambda_W, lambda_H_G, lambda_H_C,                   # regularization parameters
+    lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss,                  # regularization parameters
     method,                 # method and options for scipy minimize
     options,
     G_loss_type, C_loss_type, # in 'kl_div', 'bce', 'fro' or None (None indicates not fitting to data, i.e. if G_loss_type=None & C_loss_type='fro then C only optimization)
@@ -200,20 +200,20 @@ def alternating_opt(
     To run C only (CNMF)
     To run with all Frobenius norm (SCoNE (Fro))
     '''
-    def one_block_update(name, X, method, options, G_loss_type, C_loss_type):
+    def one_block_update(name, X, method, options):
         x0 = X.flatten(order='F') 
         bnds = [(0, None)] * x0.size if nonneg else None
 
         if name == "W":
-            fun = make_fg_W(W.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type)
+            fun = make_fg_W(W.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
         elif name == "H_G":
-            fun = make_fg_HG(H_G.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type)
+            fun = make_fg_HG(H_G.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
         elif name == "H_C":
-            fun = make_fg_HC(H_C.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type)
+            fun = make_fg_HC(H_C.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
         elif name == "U_G":
-            fun = make_fg_UG(U_G.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type)
+            fun = make_fg_UG(U_G.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
         elif name == "U_C":
-            fun = make_fg_UC(U_C.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type)
+            fun = make_fg_UC(U_C.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
         else:
             raise ValueError(f"Unknown block {name}")
         res = minimize(fun, x0, method=method, jac=True, bounds=bnds, options=options)
@@ -221,18 +221,18 @@ def alternating_opt(
 
     # initial objective
     loss_dict = defaultdict(list)
-    f_prev, G_loss, C_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type)
+    f_prev, G_loss, C_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
 
     for _ in range(max_outer):
-        W   = one_block_update("W",   W, method, options, G_loss_type, C_loss_type)
+        W   = one_block_update("W",   W, method, options)
         if G_loss_type is not None:
-            H_G = one_block_update("H_G", H_G, method, options, G_loss_type, C_loss_type)
-            U_G = one_block_update("U_G", U_G, method, options, G_loss_type, C_loss_type)
+            H_G = one_block_update("H_G", H_G, method, options)
+            U_G = one_block_update("U_G", U_G, method, options)
         if C_loss_type is not None:
-            H_C = one_block_update("H_C", H_C, method, options, G_loss_type, C_loss_type)
-            U_C = one_block_update("U_C", U_C, method, options, G_loss_type, C_loss_type)
+            H_C = one_block_update("H_C", H_C, method, options)
+            U_C = one_block_update("U_C", U_C, method, options)
 
-        f_cur, G_loss, C_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, G_loss_type, C_loss_type)
+        f_cur, G_loss, C_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
         loss_dict['total_loss'].append(f_cur)
         loss_dict['G_loss'].append(G_loss)
         loss_dict['C_loss'].append(C_loss)
