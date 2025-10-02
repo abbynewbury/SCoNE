@@ -50,10 +50,10 @@ import importlib
 # PARAMETERS
 # generate all combinations of e and ps variables
 ps_list = [True,False]
-e_list = [0.25,0.5,0.75,1] 
+e_list = [0.25, 0.50, 0.75, 1]
 g_list = [10] 
-dataset_list = range(11) # 11 random datasets for each combination
-num_markers = 100
+dataset_list = range(11) # 11 random datasets for each combination 
+num_markers = 1000
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
 rank = 3
@@ -81,7 +81,7 @@ def _call_kwargs(kw):
 def run_one_wrapper(ps, e, dataset, g, init,
                     Z,
                     W, H_G, H_C, U_G, U_C,
-                    lambda_W, lambda_H_G, lambda_H_C,
+                    lambda_W, lambda_H_G, lambda_H_C,lambda_Gloss,
                     G_loss_type, C_loss_type,
                     max_outer,min_outer,tol,nonneg,
                     sim_output_dir, exp_num,run_name,artifact_dir): 
@@ -103,18 +103,21 @@ def run_one_wrapper(ps, e, dataset, g, init,
             .reindex(simulation_metadata['iid_order']).iloc[:,:2].to_numpy().astype(int))
     ground_truth = {"W":W_true}
 
+    if lambda_Gloss == 'ratio': # TODO: clean this up
+        lambda_Gloss = C.sum()/G.sum()
+
     return MLFlowWrapper.train_with_mlflow( 
         algorithm_func=SCoNE.alternating_opt,
         artifact_dir=artifact_dir,
         run_name=run_name,
         algorithm_func_kwargs={"G":G[iid_index,:], "C":C, "Z":Z[iid_index,:], "W":W[iid_index,:], "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C,
-                               "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C,"lambda_Gloss":1,
+                               "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C,"lambda_Gloss":lambda_Gloss,
                                "method":'L-BFGS-B', "options":{'maxcor':10,'maxiter':10,'gtol':1e-5,'maxls':5,'ftol':1e-6},  # keep scipy methods and options fixed
                                "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
                                "max_outer":max_outer, "min_outer":min_outer, "tol":tol, "nonneg":nonneg},
         params={"ps": ps, "e": e, "dataset": dataset, "g": g, "init":init,
                 "run_seed": simulation_metadata["run_seed"], "tol": tol, "max_outer": max_outer, "min_outer":min_outer,
-                "lambda_W": lambda_W, "lambda_H_G": lambda_H_G, "lambda_H_C": lambda_H_C, "run_name":run_name,
+                "lambda_W": lambda_W, "lambda_H_G": lambda_H_G, "lambda_H_C": lambda_H_C, "lambda_Gloss":lambda_Gloss, "run_name":run_name,
                 "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
                 "method":'L-BFGS-B', "options":{'maxcor':10,'maxiter':10,'gtol':1e-5,'maxls':5,'ftol':1e-6}},
         eval_fn=cluster_evaluation.compute_sim_metrics, 
@@ -168,7 +171,7 @@ if tuning:
             ps=ps, e=e, dataset=tuning_dataset[ps, e, g], g=g,
             init = 0,
             Z=Z if run_name != 'sHNMF' else np.zeros((Z.shape[0],Z.shape[1])), W=W, H_G=H_G, H_C=H_C, U_G=U_G, U_C=U_C,
-            lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,
+            lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,lambda_Gloss='ratio',
             max_outer=50, min_outer=5, tol=1e-6, nonneg=True,
             sim_output_dir=sim_output_dir, exp_num=exp_map[ps, e, g],
             run_name=run_name,G_loss_type='kl_div' if run_name!='SCoNE(Fro)' else 'fro', C_loss_type='kl_div' if run_name!='SCoNE(Fro)' else 'fro',
@@ -240,7 +243,12 @@ if testing:
             else:
                 lambda_W, lambda_H_G, lambda_H_C = (0,0,0)
             for init, idx in product(range(10),other_idx): # get 10 random iniitalizations of each
-                combos.append((ps, e, g, lambda_W, lambda_H_G, lambda_H_C, run_name, init, idx))
+                if run_name in ['HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF']:
+                    for lambda_Gloss in ['ratio',0.5,1]:
+                        combos.append((ps, e, g, lambda_W, lambda_H_G, lambda_H_C, run_name, init, idx, lambda_Gloss))
+                else:
+                    lambda_Gloss=1
+                    combos.append((ps, e, g, lambda_W, lambda_H_G, lambda_H_C, run_name, init, idx, lambda_Gloss))
     cfgs = [
         dict(
             ps=ps, e=e, dataset=idx, g=g,
@@ -248,14 +256,14 @@ if testing:
             Z=Z if run_name not in ['sHNMF','HNMF','G-NMF','C-NMF'] else np.zeros((Z.shape[0],Z.shape[1])), W=np.random.uniform(low=0.1,high=1,size=(2504, rank)), 
             H_G=np.random.uniform(low=0.1,high=1,size=(num_markers, rank)), H_C=np.random.uniform(low=0.1,high=1,size=(100, rank)), U_G=np.random.uniform(low=0.1,high=1,size=(num_markers, Z.shape[1])),
             U_C=np.random.uniform(low=0.1,high=1,size=(100, Z.shape[1])),
-            lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,
+            lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C, lambda_Gloss=lambda_Gloss,
             max_outer=50, min_outer=5, tol=1e-6, nonneg=True,
             sim_output_dir=sim_output_dir, exp_num=exp_map[ps, e, g],
             run_name=run_name,G_loss_type='kl_div' if run_name not in ['SCoNE(Fro)','C-NMF','C-CoNE'] else ('fro' if run_name=='SCoNE(Fro)' else None), 
             C_loss_type='kl_div' if run_name not in ['SCoNE(Fro)','G-NMF','G-CoNE'] else ('fro' if run_name=='SCoNE(Fro)' else None),
             artifact_dir=f"{os.path.dirname(artifact_dir)}/logs"
         )
-        for i, (ps, e, g, lambda_W, lambda_H_G, lambda_H_C, run_name, init, idx) in enumerate(combos)
+        for i, (ps, e, g, lambda_W, lambda_H_G, lambda_H_C, run_name, init, idx, lambda_Gloss) in enumerate(combos)
     ]
     mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/logs")
     for i in range(len(list(product(ps_list, e_list, g_list)))):

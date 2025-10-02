@@ -40,9 +40,9 @@ from simulations.genomes1000_sim import *
 
 
 # PARAMETERS
-generate_sim = False
-evaluate_sim = True 
-run_gwas = True  # only will run if run_gwas=True AND evaluate_sim=True 
+generate_sim = True
+evaluate_sim = False 
+run_gwas = False  # only will run if run_gwas=True AND evaluate_sim=True 
 # generate all combinations of e and ps variables
 ps_list = [True,False]
 e_list = [0.25, 0.50, 0.75, 1]
@@ -74,7 +74,7 @@ if generate_sim:
         extra_subgroups_size=200,
         M=100,
         num_clinical_assoc=10,
-        num_markers=100
+        num_markers=1000
     )
 
     results = Parallel(n_jobs=-1)(
