@@ -226,10 +226,10 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
         phenotypic_subgroup_df = phenotypic_subgroup_df.merge(igsr_samples[['IID','Superpopulation code']],on='IID',how='inner')
         # corresponding genetic subgroup value for r
         if ps:
-            phenotypic_subgroup_df['superpop_shift'] = phenotypic_subgroup_df['Superpopulation code'].map({sp: streams["ps_noise"].uniform(-0.05, 0.05) for sp in phenotypic_subgroup_df['Superpopulation code'].unique()})
+            phenotypic_subgroup_df['superpop_shift'] = phenotypic_subgroup_df['Superpopulation code'].map({sp: streams["ps_noise"].uniform(-0.1, 0.1) for sp in phenotypic_subgroup_df['Superpopulation code'].unique()})
         else:
             phenotypic_subgroup_df['superpop_shift'] = 0
-        phenotypic_subgroup_df['subgroup'] = phenotypic_subgroup_df['z']*e + streams["env_noise"].normal(loc=0,scale=0.1,size=phenotypic_subgroup_df.shape[0]) + phenotypic_subgroup_df["superpop_shift"]> 0.842*e
+        phenotypic_subgroup_df['subgroup'] = phenotypic_subgroup_df['z']*e + streams["env_noise"].normal(loc=0,scale=1,size=phenotypic_subgroup_df.shape[0]) + phenotypic_subgroup_df["superpop_shift"]> 0.842*e
         gi_phenotypic_subgroups.append(phenotypic_subgroup_df)
     gi_phenotypic_subgroups = pd.concat(gi_phenotypic_subgroups)
     # remove overlapping samples in phenotypic subgroups 0 and 1
@@ -258,7 +258,7 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
     # 4. simulate M binary clinical features
     # start with baseline probabilities
     if ps:
-        sp2bump = {sp: streams["ps_noise"].uniform(-0.1, 0.1)
+        sp2bump = {sp: streams["ps_noise"].uniform(-0.2, 0.2)
             for sp in igsr_samples['Superpopulation code'].unique()}
         subj_bump = (igsr_samples
                     .set_index('IID')['Superpopulation code']

@@ -74,7 +74,7 @@ if generate_sim:
         extra_subgroups_size=200,
         M=100,
         num_clinical_assoc=10,
-        num_markers=1000
+        num_markers=100
     )
 
     results = Parallel(n_jobs=-1)(

@@ -53,11 +53,11 @@ ps_list = [True,False]
 e_list = [0.25, 0.50, 0.75, 1]
 g_list = [10] 
 dataset_list = range(11) # 11 random datasets for each combination 
-num_markers = 1000
+num_markers = 100
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
 rank = 3
-tuning = False # to run sparsity tuning step
+tuning = True # to run sparsity tuning step
 testing = True # to run testing step
 # PARAMETERS
 np.random.seed(42)
@@ -171,7 +171,7 @@ if tuning:
             ps=ps, e=e, dataset=tuning_dataset[ps, e, g], g=g,
             init = 0,
             Z=Z if run_name != 'sHNMF' else np.zeros((Z.shape[0],Z.shape[1])), W=W, H_G=H_G, H_C=H_C, U_G=U_G, U_C=U_C,
-            lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,lambda_Gloss='ratio',
+            lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,lambda_Gloss=1,
             max_outer=50, min_outer=5, tol=1e-6, nonneg=True,
             sim_output_dir=sim_output_dir, exp_num=exp_map[ps, e, g],
             run_name=run_name,G_loss_type='kl_div' if run_name!='SCoNE(Fro)' else 'fro', C_loss_type='kl_div' if run_name!='SCoNE(Fro)' else 'fro',
@@ -244,7 +244,7 @@ if testing:
                 lambda_W, lambda_H_G, lambda_H_C = (0,0,0)
             for init, idx in product(range(10),other_idx): # get 10 random iniitalizations of each
                 if run_name in ['HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF']:
-                    for lambda_Gloss in ['ratio',0.5,1]:
+                    for lambda_Gloss in [1]: # todo switch back to ['ratio',0.5,1]
                         combos.append((ps, e, g, lambda_W, lambda_H_G, lambda_H_C, run_name, init, idx, lambda_Gloss))
                 else:
                     lambda_Gloss=1
