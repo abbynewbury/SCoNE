@@ -197,22 +197,6 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
     extra_markers = (maf_by_superpop[(maf_by_superpop['ps']==ps)&(~maf_by_superpop['SNP'].isin(all_markers_assoc))]
                     .sample(n=num_markers-len(all_markers_assoc), replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist())
     assert len(all_markers_assoc) + len(extra_markers) == num_markers
-    # extract all markers
-    with open(f'{intermediate_file_dir}/allmarkers_{intermediate_file_suffix}.txt','w') as f:
-        for snp in extra_markers:
-            f.write(snp + "\n")
-        for snp in all_markers_assoc:
-            f.write(snp + "\n")
-    
-    # extract all markers
-    plink_extract = f'''
-    module load plink/1.9 && plink --bfile {bfile_path} \
-        --extract {intermediate_file_dir}/allmarkers_{intermediate_file_suffix}.txt \
-        --make-bed \
-        --recode A \
-        --out {output_dir}/G_{intermediate_file_suffix}
-    '''
-    result = subprocess.run(plink_extract, shell=True, check=True, executable="/bin/bash")
 
 
     # 3. Generate phenotypic subgroups
@@ -253,6 +237,27 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
         non_gi_phenotypic_subgroups.append(phenotypic_subgroup_df)
     non_gi_phenotypic_subgroups = pd.concat(non_gi_phenotypic_subgroups)
     phenotypic_subgroups = pd.concat([gi_phenotypic_subgroups,non_gi_phenotypic_subgroups])
+
+    # extract all markers & correct individuals for final G
+    with open(f'{intermediate_file_dir}/allmarkers_{intermediate_file_suffix}.txt','w') as f:
+        for snp in extra_markers:
+            f.write(snp + "\n")
+        for snp in all_markers_assoc:
+            f.write(snp + "\n")
+    with open(f'{intermediate_file_dir}/iids_{intermediate_file_suffix}.txt','w') as f:
+        for iid in iid_order:
+            f.write(iid + "\t" + iid + "\n")
+
+    # extract all markers
+    plink_extract = f'''
+    module load plink/1.9 && plink --bfile {bfile_path} \
+        --extract {intermediate_file_dir}/allmarkers_{intermediate_file_suffix}.txt \
+        --keep {intermediate_file_dir}/iids_{intermediate_file_suffix}.txt \
+        --make-bed \
+        --recode A \
+        --out {output_dir}/G_{output_file_suffix}
+    '''
+    result = subprocess.run(plink_extract, shell=True, check=True, executable="/bin/bash")
 
 
     # 4. simulate M binary clinical features

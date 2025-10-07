@@ -1,0 +1,17 @@
+# python wrapper for MVBC
+import subprocess
+import json
+
+
+def MVBCWrapper(G_path, C_path, lambda_W, lambda_H_G, lambda_H_C, rank):
+    for i in rank:
+        result = subprocess.run(
+        f'{r_path} algorithms/MVBC.R {G_path} {C_path} {lambda_W} {lambda_H_G} {lambda_H_C}',
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        shell=True, executable='/bin/bash')
+        r_output = result.stdout.strip()
+        warn_output = result.stderr.strip()   
+        parsed = json.loads(r_output)
+        ci = np.array(parsed['Cluster']).flatten()

@@ -40,9 +40,11 @@ admixture_filepath = f'{root_dir}/release-20130502-supporting/admixture_files/AL
 map_filepath = f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.map'
 code_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/code'
 artifact_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/output/logs'
+r_path = '/gpfs/commons/home/anewbury/miniconda/bin/Rscript'
 sys.path.append(code_dir)
 import simulations.genomes1000_sim as sim_functions
 import algorithms.SCoNE as SCoNE
+import algorithms.RGWASWrapper as RGWASWrapper
 import algorithms.MLFlowWrapper as MLFlowWrapper
 import evaluation.cluster_evaluation as cluster_evaluation
 import importlib
@@ -57,7 +59,7 @@ num_markers = 100
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
 rank = 3
-tuning = True # to run sparsity tuning step
+tuning = False # to run sparsity tuning step
 testing = True # to run testing step
 # PARAMETERS
 np.random.seed(42)
@@ -87,14 +89,16 @@ def run_one_wrapper(ps, e, dataset, g, init,
                     sim_output_dir, exp_num,run_name,artifact_dir): 
     output_suffix = sim_functions.get_output_file_suffix(ps=ps, e=e, dataset=dataset, g=g)
     print(f"{sim_output_dir}/simulation_metadata_{output_suffix}.pkl")
-    C = np.load(f'{sim_output_dir}/C_{output_suffix}.npy')
+    C_path = f'{sim_output_dir}/C_{output_suffix}.npy'
+    C = np.load(C_path)
     with open(f"{sim_output_dir}/simulation_metadata_{output_suffix}.pkl", "rb") as f:
         simulation_metadata = pickle.load(f)
     fam_df = pd.read_csv(f'{bfile_path}.fam',sep='\s+',header=None)
     fam_df.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
     iid_index = fam_df[fam_df['IID'].isin(simulation_metadata['iid_order'])].index # some samples removed due to overlap btwn subgroups, need correct length
     # read in G with num_markers
-    G = np.loadtxt(f'{sim_output_dir}/G_{sim_functions.get_output_file_suffix(ps,e,dataset,g)}.raw',  usecols=range(6, num_markers+6), dtype=np.int8, skiprows=1)
+    G_path = f'{sim_output_dir}/G_{sim_functions.get_output_file_suffix(ps,e,dataset,g)}.raw'
+    G = np.loadtxt(G_path,  usecols=range(6, num_markers+6), dtype=np.int8, skiprows=1)
     fam_df_subset = pd.read_csv(f'{sim_output_dir}/G_{sim_functions.get_output_file_suffix(ps,e,dataset,g)}.fam',sep='\s+',header=None)
     fam_df_subset.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
     assert all(fam_df_subset['IID'].values == fam_df['IID'].values)
@@ -106,11 +110,12 @@ def run_one_wrapper(ps, e, dataset, g, init,
     if lambda_Gloss == 'ratio': # TODO: clean this up
         lambda_Gloss = C.sum()/G.sum()
 
-    return MLFlowWrapper.train_with_mlflow( 
+    if run_name in ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF']:
+        return MLFlowWrapper.train_with_mlflow( 
         algorithm_func=SCoNE.alternating_opt,
         artifact_dir=artifact_dir,
         run_name=run_name,
-        algorithm_func_kwargs={"G":G[iid_index,:], "C":C, "Z":Z[iid_index,:], "W":W[iid_index,:], "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C,
+        algorithm_func_kwargs={"G":G, "C":C, "Z":Z[iid_index,:], "W":W[iid_index,:], "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C,
                                "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C,"lambda_Gloss":lambda_Gloss,
                                "method":'L-BFGS-B', "options":{'maxcor':10,'maxiter':10,'gtol':1e-5,'maxls':5,'ftol':1e-6},  # keep scipy methods and options fixed
                                "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
@@ -124,6 +129,24 @@ def run_one_wrapper(ps, e, dataset, g, init,
         ground_truth=ground_truth,
         experiment_name=str(exp_num))
 
+    elif run_name == 'MVBC':
+        pass
+    elif run_name == 'RGWAS':
+        Z_path = f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.Q'
+        iid_index_path = f'{sim_output_dir}/iid_index_{sim_functions.get_output_file_suffix(ps,e,dataset,g)}.npy'
+        return  MLFlowWrapper.train_with_mlflow(algorithm_func=RGWASWrapper.RGWASWrapper,
+        artifact_dir=artifact_dir,
+        run_name=run_name,
+        algorithm_func_kwargs={"iid_index_path":iid_index_path,"r_path":r_path, "G_path":G_path,
+                        "C_path":C_path, "Z_path":Z_path, "iid_index":iid_index},
+        params={"ps": ps, "e": e, "dataset": dataset, "g": g,
+        "run_name":run_name},
+        eval_fn=cluster_evaluation.compute_sim_metrics, 
+        ground_truth=ground_truth,
+        experiment_name=str(exp_num))
+
+    else: assert True == False, f"invalid run name {run_name}"
+
 os.makedirs(artifact_dir, exist_ok=True)
 os.makedirs(f"{os.path.dirname(artifact_dir)}/slurm_logs", exist_ok=True)
 os.makedirs(f"{os.path.dirname(artifact_dir)}/logs_tuning", exist_ok=True)
@@ -135,27 +158,27 @@ for i, (ps, e, g) in enumerate(product(ps_list, e_list, g_list)):
     key = (ps, e, g)
     tuning_dataset[key] = np.random.randint(0, 11)
     exp_map[key] = i
-    
+# submit as a SLURM array (adjust params as needed)
+executor = submitit.AutoExecutor(folder=f"{os.path.dirname(artifact_dir)}/slurm_logs")
+executor.update_parameters(
+    slurm_job_name="fact-grid",
+    timeout_min=180,
+    cpus_per_task=1,
+    mem_gb=3,
+    slurm_array_parallelism=200,
+    stderr_to_stdout=True,
+    slurm_additional_parameters={
+        "output": f"{os.path.dirname(artifact_dir)}/slurm_logs/%x_%A_%a.out",
+        "error":  f"{os.path.dirname(artifact_dir)}/slurm_logs/%x_%A_%a.out",
+        "export": "ALL,PYTHONUNBUFFERED=1",
+        "mail-type": "FAIL",                      
+        "mail-user": "anewbury@nygenome.org",
+    },
+)
 
 # STEP 1: hparam tuning with 1 randomly selected dataset per experiment (and then remove it from testing)
+# TODO: switch to best over 10 inits
 if tuning:
-    # submit as a SLURM array (adjust params as needed)
-    executor = submitit.AutoExecutor(folder=f"{os.path.dirname(artifact_dir)}/slurm_logs")
-    executor.update_parameters(
-        slurm_job_name="fact-grid",
-        timeout_min=180,
-        cpus_per_task=1,
-        mem_gb=3,
-        slurm_array_parallelism=200,
-        stderr_to_stdout=True,
-        slurm_additional_parameters={
-            "output": f"{os.path.dirname(artifact_dir)}/slurm_logs/%x_%A_%a.out",
-            "error":  f"{os.path.dirname(artifact_dir)}/slurm_logs/%x_%A_%a.out",
-            "export": "ALL,PYTHONUNBUFFERED=1",
-            "mail-type": "FAIL",                      
-            "mail-user": "anewbury@nygenome.org",
-        },
-    )
     combos = [(ps, e, g, lW, lHG, lHC, rn)
     for ps, e, g, lW, lHG, lHC, rn in product(
         ps_list, e_list, g_list, [0,0.3,0.5,1],[0,0.3,0.5,1],[0,0.3,0.5,1], ['SCoNE','SCoNE(Fro)','sHNMF']
@@ -191,7 +214,8 @@ if tuning:
     print(f"[{t1:%Y-%m-%d %H:%M:%S %Z}] now running… elapsed={t1 - t0}", flush=True)
 
 if testing:
-    testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF']
+    #testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF']
+    testing_runs = ['RGWAS']
     if any(x in testing_runs for x in ['SCoNE','SCoNE(Fro)','sHNMF']):
 
         # STEP 2: find optimal sparsity parameters for each method
@@ -216,20 +240,6 @@ if testing:
 
     # STEP 3: testing/comparison over 10 other datasets for each experiment
     # submit as a SLURM array (adjust params as needed)
-    executor = submitit.AutoExecutor(folder=f"{os.path.dirname(artifact_dir)}/slurm_logs")
-    executor.update_parameters(
-        slurm_job_name="fact-grid",
-        timeout_min=180,
-        cpus_per_task=1,
-        mem_gb=3,
-        slurm_array_parallelism=200,
-        stderr_to_stdout=True,
-        slurm_additional_parameters={
-            "output": "slurm_logs/%x_%A_%a.out",
-            "error":  "slurm_logs/%x_%A_%a.out",
-            "export": "ALL,PYTHONUNBUFFERED=1",
-        },
-    )
     # build combos excluding the tuning dataset per (ps,e,g)
     combos = []
     for ps, e, g in product(ps_list, e_list, g_list):
@@ -242,13 +252,13 @@ if testing:
                 lambda_W, lambda_H_G, lambda_H_C = matching_best_run[['params.lambda_W','params.lambda_H_G','params.lambda_H_C']].values[0].tolist()
             else:
                 lambda_W, lambda_H_G, lambda_H_C = (0,0,0)
-            for init, idx in product(range(10),other_idx): # get 10 random iniitalizations of each
-                if run_name in ['HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF']:
-                    for lambda_Gloss in [1]: # todo switch back to ['ratio',0.5,1]
+            for idx in other_idx: # get 10 random initalizations of each
+                if run_name in ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF']:
+                    for init in range(10):
+                        lambda_Gloss=1
                         combos.append((ps, e, g, lambda_W, lambda_H_G, lambda_H_C, run_name, init, idx, lambda_Gloss))
-                else:
-                    lambda_Gloss=1
-                    combos.append((ps, e, g, lambda_W, lambda_H_G, lambda_H_C, run_name, init, idx, lambda_Gloss))
+                elif run_name=='RGWAS': # 10 inits are done within method
+                    combos.append((ps, e, g, None, None, None, run_name, None, idx, None))
     cfgs = [
         dict(
             ps=ps, e=e, dataset=idx, g=g,

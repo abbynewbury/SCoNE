@@ -226,4 +226,4 @@ class TestSCoNE(unittest.TestCase):
 # test cluster eval metrics
 # current test embedded in nmi, that our nmi calculation matches sklearn nmi
 
-# test that all fam files for the same G have iid in same order
+# test that all fam files for the same G have iid in same order (Verify map and ped root dir files have same order as fam once make bfile)
