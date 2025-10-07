@@ -183,7 +183,7 @@ def make_fg_UC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lamb
 
 def alternating_opt(
     G,C,Z,              # true matrices
-    W, H_G, H_C, U_G, U_C,  # initializations
+    rank, num_init, # init: number of initializations (will choose one with best loss as final result)
     lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss,                  # regularization parameters
     method,                 # method and options for scipy minimize
     options,
@@ -219,48 +219,63 @@ def alternating_opt(
         res = minimize(fun, x0, method=method, jac=True, bounds=bnds, options=options)
         return res.x.reshape(X.shape, order='F')
 
-    # initial objective
-    loss_dict = defaultdict(list)
-    f_prev, G_loss, C_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
+    best_total_loss = np.inf
+    for run in range(num_init):
+        # initialize factor matrices
+        W = np.random.uniform(low=0.1,high=1,size=(G.shape[0], rank))
+        H_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], rank))
+        H_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], rank)) 
+        U_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], Z.shape[1]))
+        U_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], Z.shape[1]))
 
-    for _ in range(max_outer):
-        W   = one_block_update("W",   W, method, options)
-        if G_loss_type is not None:
-            H_G = one_block_update("H_G", H_G, method, options)
-            U_G = one_block_update("U_G", U_G, method, options)
-        if C_loss_type is not None:
-            H_C = one_block_update("H_C", H_C, method, options)
-            U_C = one_block_update("U_C", U_C, method, options)
+        # initial objective
+        loss_dict = defaultdict(list)
+        f_prev, G_loss, C_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
 
-        f_cur, G_loss, C_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
-        loss_dict['total_loss'].append(f_cur)
-        loss_dict['G_loss'].append(G_loss)
-        loss_dict['C_loss'].append(C_loss)
-        loss_dict['regularization'].append(regularization)
-        
-        # record matrix norms
-        loss_dict['W_norm'].append(np.linalg.norm(W))
-        loss_dict['H_G_norm'].append(np.linalg.norm(H_G))
-        loss_dict['H_C_norm'].append(np.linalg.norm(H_C))
-        loss_dict['U_G_norm'].append(np.linalg.norm(U_G))
-        loss_dict['U_C_norm'].append(np.linalg.norm(U_C))
+        for _ in range(max_outer):
+            W   = one_block_update("W",   W, method, options)
+            if G_loss_type is not None:
+                H_G = one_block_update("H_G", H_G, method, options)
+                U_G = one_block_update("U_G", U_G, method, options)
+            if C_loss_type is not None:
+                H_C = one_block_update("H_C", H_C, method, options)
+                U_C = one_block_update("U_C", U_C, method, options)
 
-        # record sparsity
-        loss_dict['W_sparsity'].append(100*np.count_nonzero(W == 0)/ W.size)
-        loss_dict['H_G_sparsity'].append(100*np.count_nonzero(H_G == 0)/ H_G.size)
-        loss_dict['H_C_sparsity'].append(100*np.count_nonzero(H_C == 0)/ H_C.size)
-        loss_dict['U_G_sparsity'].append(100*np.count_nonzero(U_G == 0)/ U_G.size) # expect to stay fairly constant over time
-        loss_dict['U_C_sparsity'].append(100*np.count_nonzero(U_C == 0)/ U_C.size) # expect to stay fairly constant over time
-        
-        if ((f_prev - f_cur) / max(1.0, abs(f_prev)) < tol) and _ >= min_outer:
-            break
-        f_prev = f_cur
+            f_cur, G_loss, C_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
+            loss_dict['total_loss'].append(f_cur)
+            loss_dict['G_loss'].append(G_loss)
+            loss_dict['C_loss'].append(C_loss)
+            loss_dict['regularization'].append(regularization)
+            
+            # record matrix norms
+            loss_dict['W_norm'].append(np.linalg.norm(W))
+            loss_dict['H_G_norm'].append(np.linalg.norm(H_G))
+            loss_dict['H_C_norm'].append(np.linalg.norm(H_C))
+            loss_dict['U_G_norm'].append(np.linalg.norm(U_G))
+            loss_dict['U_C_norm'].append(np.linalg.norm(U_C))
 
-    # Normalize columns of W to L2 norm and scale rows of H to resolve scaling ambiguity
-    norms = np.linalg.norm(W, axis=0)
-    norms[norms == 0] = 1.0
-    W = W / norms
-    # scale rows of H_G and H_C
-    H_G = H_G * norms[np.newaxis, :]
-    H_C = H_C * norms[np.newaxis, :]
-    return {"W":W, "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C}, loss_dict
+            # record sparsity
+            loss_dict['W_sparsity'].append(100*np.count_nonzero(W == 0)/ W.size)
+            loss_dict['H_G_sparsity'].append(100*np.count_nonzero(H_G == 0)/ H_G.size)
+            loss_dict['H_C_sparsity'].append(100*np.count_nonzero(H_C == 0)/ H_C.size)
+            loss_dict['U_G_sparsity'].append(100*np.count_nonzero(U_G == 0)/ U_G.size) # expect to stay fairly constant over time
+            loss_dict['U_C_sparsity'].append(100*np.count_nonzero(U_C == 0)/ U_C.size) # expect to stay fairly constant over time
+            
+            assert f_prev - f_cur>=0, "loss increasing"
+            if ((f_prev - f_cur) / max(1.0, abs(f_prev)) < tol) and _ >= min_outer:
+                break
+            f_prev = f_cur
+        print(f'{f_cur} for init {run}',flush=True)
+        if f_cur < best_total_loss:
+            best_total_loss = f_cur # reset
+            final_loss_dict = loss_dict
+            # Normalize columns of W to L2 norm and scale rows of H to resolve scaling ambiguity
+            norms = np.linalg.norm(W, axis=0)
+            norms[norms == 0] = 1.0
+            W = W / norms
+            # scale rows of H_G and H_C
+            H_G = H_G * norms[np.newaxis, :]
+            H_C = H_C * norms[np.newaxis, :]
+            final_factor_matrices = {"W":W, "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C}
+            
+    return final_factor_matrices, final_loss_dict

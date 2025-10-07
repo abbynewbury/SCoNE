@@ -45,6 +45,7 @@ sys.path.append(code_dir)
 import simulations.genomes1000_sim as sim_functions
 import algorithms.SCoNE as SCoNE
 import algorithms.RGWASWrapper as RGWASWrapper
+import algorithms.MVBCWrapper as MVBCWrapper
 import algorithms.MLFlowWrapper as MLFlowWrapper
 import evaluation.cluster_evaluation as cluster_evaluation
 import importlib
@@ -80,8 +81,8 @@ Z = Z_df[[i for i in Z_df.columns if i!='IID']].to_numpy()
 def _call_kwargs(kw):
     return run_one_wrapper(**kw)  # expands kwargs dict
 
-def run_one_wrapper(ps, e, dataset, g, init,
-                    Z,
+def run_one_wrapper(ps, e, dataset, g, num_init,
+                    Z,rank,
                     W, H_G, H_C, U_G, U_C,
                     lambda_W, lambda_H_G, lambda_H_C,lambda_Gloss,
                     G_loss_type, C_loss_type,
@@ -115,7 +116,7 @@ def run_one_wrapper(ps, e, dataset, g, init,
         algorithm_func=SCoNE.alternating_opt,
         artifact_dir=artifact_dir,
         run_name=run_name,
-        algorithm_func_kwargs={"G":G, "C":C, "Z":Z[iid_index,:], "W":W[iid_index,:], "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C,
+        algorithm_func_kwargs={"G":G, "C":C, "Z":Z[iid_index,:],"rank":rank, "num_init":num_init,
                                "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C,"lambda_Gloss":lambda_Gloss,
                                "method":'L-BFGS-B', "options":{'maxcor':10,'maxiter':10,'gtol':1e-5,'maxls':5,'ftol':1e-6},  # keep scipy methods and options fixed
                                "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
@@ -128,9 +129,17 @@ def run_one_wrapper(ps, e, dataset, g, init,
         eval_fn=cluster_evaluation.compute_sim_metrics, 
         ground_truth=ground_truth,
         experiment_name=str(exp_num))
-
     elif run_name == 'MVBC':
-        pass
+        return  MLFlowWrapper.train_with_mlflow(algorithm_func=MVBCWrapper.MVBCWrapper,
+        artifact_dir=artifact_dir,
+        run_name=run_name,
+        algorithm_func_kwargs={"G_path":G_path,"C_path":C_path, "rank":rank,
+                    "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C, "r_path":r_path},
+        params={"ps": ps, "e": e, "dataset": dataset, "g": g,
+        "run_name":run_name},
+        eval_fn=cluster_evaluation.compute_sim_metrics, 
+        ground_truth=ground_truth,
+        experiment_name=str(exp_num))
     elif run_name == 'RGWAS':
         Z_path = f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.Q'
         iid_index_path = f'{sim_output_dir}/iid_index_{sim_functions.get_output_file_suffix(ps,e,dataset,g)}.npy'
@@ -138,7 +147,7 @@ def run_one_wrapper(ps, e, dataset, g, init,
         artifact_dir=artifact_dir,
         run_name=run_name,
         algorithm_func_kwargs={"iid_index_path":iid_index_path,"r_path":r_path, "G_path":G_path,
-                        "C_path":C_path, "Z_path":Z_path, "iid_index":iid_index},
+                        "C_path":C_path, "Z_path":Z_path, "iid_index":iid_index, "num_init":init,"rank":rank},
         params={"ps": ps, "e": e, "dataset": dataset, "g": g,
         "run_name":run_name},
         eval_fn=cluster_evaluation.compute_sim_metrics, 
@@ -177,23 +186,17 @@ executor.update_parameters(
 )
 
 # STEP 1: hparam tuning with 1 randomly selected dataset per experiment (and then remove it from testing)
-# TODO: switch to best over 10 inits
 if tuning:
     combos = [(ps, e, g, lW, lHG, lHC, rn)
     for ps, e, g, lW, lHG, lHC, rn in product(
         ps_list, e_list, g_list, [0,0.3,0.5,1],[0,0.3,0.5,1],[0,0.3,0.5,1], ['SCoNE','SCoNE(Fro)','sHNMF']
     ) if (lW, lHG, lHC) != (0, 0, 0)]
-    W = np.random.uniform(low=0.1,high=1,size=(2504, rank))# aorund 0 to 1e-2
-    H_G = np.random.uniform(low=0.1,high=1,size=(num_markers, rank))
-    H_C = np.random.uniform(low=0.1,high=1,size=(100, rank)) # fixed: 100 clinical vars
-    U_G = np.random.uniform(low=0.1,high=1,size=(num_markers, Z.shape[1]))
-    U_C = np.random.uniform(low=0.1,high=1,size=(100, Z.shape[1]))
 
     cfgs = [
         dict(
             ps=ps, e=e, dataset=tuning_dataset[ps, e, g], g=g,
-            init = 0,
-            Z=Z if run_name != 'sHNMF' else np.zeros((Z.shape[0],Z.shape[1])), W=W, H_G=H_G, H_C=H_C, U_G=U_G, U_C=U_C,
+            num_init = 10,
+            Z=Z if run_name != 'sHNMF' else np.zeros((Z.shape[0],Z.shape[1])), rank=rank, W=W, H_G=H_G, H_C=H_C, U_G=U_G, U_C=U_C,
             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,lambda_Gloss=1,
             max_outer=50, min_outer=5, tol=1e-6, nonneg=True,
             sim_output_dir=sim_output_dir, exp_num=exp_map[ps, e, g],
@@ -253,19 +256,13 @@ if testing:
             else:
                 lambda_W, lambda_H_G, lambda_H_C = (0,0,0)
             for idx in other_idx: # get 10 random initalizations of each
-                if run_name in ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF']:
-                    for init in range(10):
-                        lambda_Gloss=1
-                        combos.append((ps, e, g, lambda_W, lambda_H_G, lambda_H_C, run_name, init, idx, lambda_Gloss))
-                elif run_name=='RGWAS': # 10 inits are done within method
-                    combos.append((ps, e, g, None, None, None, run_name, None, idx, None))
+                lambda_Gloss=1
+                combos.append((ps, e, g, lambda_W, lambda_H_G, lambda_H_C, run_name, idx, lambda_Gloss))
     cfgs = [
         dict(
             ps=ps, e=e, dataset=idx, g=g,
-            init = init,
-            Z=Z if run_name not in ['sHNMF','HNMF','G-NMF','C-NMF'] else np.zeros((Z.shape[0],Z.shape[1])), W=np.random.uniform(low=0.1,high=1,size=(2504, rank)), 
-            H_G=np.random.uniform(low=0.1,high=1,size=(num_markers, rank)), H_C=np.random.uniform(low=0.1,high=1,size=(100, rank)), U_G=np.random.uniform(low=0.1,high=1,size=(num_markers, Z.shape[1])),
-            U_C=np.random.uniform(low=0.1,high=1,size=(100, Z.shape[1])),
+            num_init = 10,
+            Z=Z if run_name not in ['sHNMF','HNMF','G-NMF','C-NMF'] else np.zeros((Z.shape[0],Z.shape[1])), rank=rank,
             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C, lambda_Gloss=lambda_Gloss,
             max_outer=50, min_outer=5, tol=1e-6, nonneg=True,
             sim_output_dir=sim_output_dir, exp_num=exp_map[ps, e, g],
@@ -273,12 +270,12 @@ if testing:
             C_loss_type='kl_div' if run_name not in ['SCoNE(Fro)','G-NMF','G-CoNE'] else ('fro' if run_name=='SCoNE(Fro)' else None),
             artifact_dir=f"{os.path.dirname(artifact_dir)}/logs"
         )
-        for i, (ps, e, g, lambda_W, lambda_H_G, lambda_H_C, run_name, init, idx, lambda_Gloss) in enumerate(combos)
+        for i, (ps, e, g, lambda_W, lambda_H_G, lambda_H_C, run_name, idx, lambda_Gloss) in enumerate(combos)
     ]
     mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/logs")
     for i in range(len(list(product(ps_list, e_list, g_list)))):
         exp = mlflow.set_experiment(str(i)) # set experiment id ahead of time for slurm parallelism
-    jobs = executor.map_array(_call_kwargs, cfgs)  # TODO: put back
+    jobs = executor.map_array(_call_kwargs, cfgs)
 
 
 # todo - choose over inits from best loss

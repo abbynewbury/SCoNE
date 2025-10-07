@@ -16,8 +16,7 @@ hdr <- fread(G_path, nrows = 0)
 G <- fread(G_path, select = 7:ncol(hdr)) # skip first 6 columns
 G <- as.matrix(G)
 storage.mode(G) <- "integer" 
-C <- npyLoad(C_path)
-storage.mode(C) <- "integer" 
+C <- npyLoad(C_path,"integer")
 
 # read in Z
 Z <- read.table(Z_path, header = FALSE, sep = "", stringsAsFactors = FALSE, check.names = FALSE)
