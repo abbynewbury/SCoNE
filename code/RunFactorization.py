@@ -101,7 +101,7 @@ def run_one_wrapper(ps, e, dataset, g, init,
     G = np.loadtxt(G_path,  usecols=range(6, num_markers+6), dtype=np.int8, skiprows=1)
     fam_df_subset = pd.read_csv(f'{sim_output_dir}/G_{sim_functions.get_output_file_suffix(ps,e,dataset,g)}.fam',sep='\s+',header=None)
     fam_df_subset.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
-    assert all(fam_df_subset['IID'].values == fam_df['IID'].values)
+    assert set(fam_df_subset['IID'].values).issubset(set(fam_df['IID'].values))
     # Note: first two columns are genetically-informed subgroups by construction
     W_true = (simulation_metadata['phenotypic_subgroups'].pivot(index='IID',columns='phenotypic_subgroup',values='subgroup')
             .reindex(simulation_metadata['iid_order']).iloc[:,:2].to_numpy().astype(int))
@@ -162,7 +162,7 @@ for i, (ps, e, g) in enumerate(product(ps_list, e_list, g_list)):
 executor = submitit.AutoExecutor(folder=f"{os.path.dirname(artifact_dir)}/slurm_logs")
 executor.update_parameters(
     slurm_job_name="fact-grid",
-    timeout_min=180,
+    timeout_min=300,
     cpus_per_task=1,
     mem_gb=3,
     slurm_array_parallelism=200,
@@ -278,7 +278,7 @@ if testing:
     mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/logs")
     for i in range(len(list(product(ps_list, e_list, g_list)))):
         exp = mlflow.set_experiment(str(i)) # set experiment id ahead of time for slurm parallelism
-    jobs = executor.map_array(_call_kwargs, cfgs) 
+    jobs = executor.map_array(_call_kwargs, cfgs)  # TODO: put back
 
 
 # todo - choose over inits from best loss

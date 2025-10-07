@@ -3,6 +3,7 @@
 data/*
 output/*
 !*.py
+!*.R
 !.gitignore
 !readme.md
 !code/simulate_data.ipynb

@@ -180,8 +180,7 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
         #raw[geno_cols] = (raw[geno_cols] > 0).astype(int) # recode s.t. values 1 and 2 map to 1 - keep columns in 0/1/2
         genetic_subgroup_df = raw.set_index('IID')[geno_cols].sum(axis=1).reset_index(name=f'r')
         genetic_subgroup_df['genetic_subgroup'] = genetic_subgroup
-        genetic_subgroup_df["z"] = (genetic_subgroup_df["r"] - genetic_subgroup_df["r"].mean()) / genetic_subgroup_df["r"].std(ddof=0)
-        genetic_subgroup_df[f'subgroup'] = genetic_subgroup_df['z']> 0.842 # ~ Top 10% of people per r
+        genetic_subgroup_df[f'subgroup'] = genetic_subgroup_df['r'] > genetic_subgroup_df['r'].quantile(0.8)
         genetic_subgroups.append(genetic_subgroup_df)
     genetic_subgroups = pd.concat(genetic_subgroups)
     # remove overlapping samples in genetic subgroups 0 and 1
@@ -213,7 +212,7 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
             phenotypic_subgroup_df['superpop_shift'] = phenotypic_subgroup_df['Superpopulation code'].map({sp: streams["ps_noise"].uniform(-0.1, 0.1) for sp in phenotypic_subgroup_df['Superpopulation code'].unique()})
         else:
             phenotypic_subgroup_df['superpop_shift'] = 0
-        phenotypic_subgroup_df['subgroup'] = phenotypic_subgroup_df['z']*e + streams["env_noise"].normal(loc=0,scale=1,size=phenotypic_subgroup_df.shape[0]) + phenotypic_subgroup_df["superpop_shift"]> 0.842*e
+        phenotypic_subgroup_df['subgroup'] = phenotypic_subgroup_df['r']*e + streams["env_noise"].normal(loc=0,scale=1,size=phenotypic_subgroup_df.shape[0]) + phenotypic_subgroup_df["superpop_shift"]> phenotypic_subgroup_df['r'].quantile(0.8)*e
         gi_phenotypic_subgroups.append(phenotypic_subgroup_df)
     gi_phenotypic_subgroups = pd.concat(gi_phenotypic_subgroups)
     # remove overlapping samples in phenotypic subgroups 0 and 1
