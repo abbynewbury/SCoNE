@@ -79,6 +79,5 @@ rank        <- as.numeric(args[3])
 lambda_W    <- if (length(args) >= 4) as.numeric(args[4]) else 1
 lambda_H_G  <- if (length(args) >= 5) as.numeric(args[5]) else 1
 lambda_H_C  <- if (length(args) >= 6) as.numeric(args[6]) else 1
-maxOuter  <- if (length(args) >= 7) as.numeric(args[7]) else 100000 # 100000 is default
-
+maxOuter  <- 1000000 # 100000 is default, we increase it to 1000000 & if convergence still fails, consider it failed run
 run_mvbc(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, maxOuter)

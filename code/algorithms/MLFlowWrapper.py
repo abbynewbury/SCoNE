@@ -46,7 +46,11 @@ def train_with_mlflow(
         start_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
         factor_matrices, loss_history = algorithm_func(**algorithm_func_kwargs)
-
+        if factor_matrices is False: # failure reason stored in second output
+            mlflow.log_param("failure_reason", loss_history)
+            mlflow.end_run(status="FAILED")
+            return 
+        
         gc.collect()
         end_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         max_mem = (end_mem - start_mem) / 1024  # KB to MB

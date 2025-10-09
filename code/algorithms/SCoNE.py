@@ -245,6 +245,7 @@ def alternating_opt(
             loss_dict['total_loss'].append(f_cur)
             loss_dict['G_loss'].append(G_loss)
             loss_dict['C_loss'].append(C_loss)
+            loss_dict['G_plus_C_loss'].append(G_loss+C_loss)
             loss_dict['regularization'].append(regularization)
             
             # record matrix norms
@@ -265,7 +266,6 @@ def alternating_opt(
             if ((f_prev - f_cur) / max(1.0, abs(f_prev)) < tol) and _ >= min_outer:
                 break
             f_prev = f_cur
-        print(f'{f_cur} for init {run}',flush=True)
         if f_cur < best_total_loss:
             best_total_loss = f_cur # reset
             final_loss_dict = loss_dict

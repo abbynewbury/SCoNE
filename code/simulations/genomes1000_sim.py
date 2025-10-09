@@ -2,12 +2,12 @@ import pandas as pd
 import subprocess
 from functools import reduce
 import numpy as np
-import umap
 from plotnine import *
 import os
 import glob
 import pickle
 import time
+from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 import sys
 from pathlib import Path
@@ -37,7 +37,7 @@ def prep_1000genomes_bed_file(root_dir, output,subset_test=False):
         --make-bed \
         --out {output}
     '''
-    result = subprocess.run(plink_extract, shell=True, check=True, executable="/bin/bash") # TODO: change back to 10,000
+    result = subprocess.run(plink_extract, shell=True, check=True, executable="/bin/bash") 
 
     # # make .raw file for G matrix later
     # plink_extract = f'''
@@ -81,15 +81,15 @@ def calculate_maf_by_superpop(igsr_samples_filepath,intermediate_file_dir,bfile_
       maf_by_superpop = pd.read_csv(f'{intermediate_file_dir}/maf_by_superpop.frq.strat',sep='\s+')
       return maf_by_superpop
 
-def get_output_file_suffix(ps,e,dataset,g):
-    return f'ps_{ps}_e_{e}_dataset_{dataset}_g_{g}'
+def get_output_file_suffix(e,g_ps,c_ps,dataset):
+    return f'e_{e}_g_ps_{g_ps}_c_ps_{c_ps}_dataset_{dataset}'
 
 def rs(streams,stream_name):
         return int(streams[stream_name].integers(1, 2**31 - 1))
 
 def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_filepath,
                           intermediate_file_dir,intermediate_file_suffix,output_dir,output_file_suffix,
-                          ps,g,e,extra_subgroups_size,M,num_clinical_assoc,num_markers, run_seed):
+                          g_ps,c_ps,g,e,extra_subgroups_size,M,num_clinical_assoc,num_markers, run_seed):
     '''
     Generate synthetic data similar to Sun et al. (Multi-view biclustering for genotype-phenotype association studies of complex diseases)
     using 1000 Genomes Phase 3 data. Use admixture files which contain 193634 markers with MAF>5% and 2504 individuals. 
@@ -104,7 +104,8 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
     output_file_suffix: such that if multiple simulations are created, each is distinctly defined - suffix for C and simulated data pkl file
     output_dir: where to write output genetic data matrix (X) in form of plink bfile, and clinical data matrix C
     M: number of clinical features (right now assuming all from one domain & all binary)
-    ps: variable controlling how much population stratification is affecting geno-pheno relationship (needs to be in range(0,1,size=0.1)) 
+    g_ps: variable controlling how much population stratification is affecting genotype (value will determine quartile of AF variance {0.25,0.5,0.75}), or if 0 will pull from EUR superpopulation)
+    c_ps: variable controlling the shift due to population stratification on phenotypic subgroup and clinical data matrix (value will determine range of uniform distribution shift Uniform(-a,a))
     (0-> pick SNPs in bottom 10% by allele frequency variance i.e. little pop. strat., 0.9-> pick SNPS in top 10% by allele frequency variance i.e. large pop. strat.)
     g: number of markers linked with subtype classification (if rij>int(0.4*markers_assoc) then subject i in subgroup j)
     e: relative effect that genetic variation contributed to the effect of the phenotype. e in [0,1]. (decreased e means higher level of disagreement between genotypic and phenotypic subgroups)
@@ -128,31 +129,54 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
     names = ["markers", "env_noise", "ps_noise", "extra_sub", "assoc", "poisson"]
     streams = {name: np.random.default_rng(ss) for name, ss in zip(names, parent_ss.spawn(len(names)))}
 
-    # 1. Read in allele frequencies per 5 superpopulations to estimate af variance across groups
+    # 1. Read in allele frequencies per 5 superpopulations to estimate af variance across groups OR pull from superpopulation EUR only
     maf_by_superpop = pd.read_csv(maf_by_superpop_filepath,sep='\s+')
     superpopulations = maf_by_superpop['CLST'].unique()
     maf_by_superpop = maf_by_superpop.pivot(index=['SNP'],columns='CLST',values='MAF').reset_index()
     igsr_samples = read_in_igsr_samples(igsr_samples_filepath,bfile_path)
 
-    # calculate weighted af variance
-    w = igsr_samples['Superpopulation code'].value_counts().to_numpy(float)
-    w_code_index = igsr_samples['Superpopulation code'].value_counts().index
-    X = maf_by_superpop[w_code_index].to_numpy(float)  
-    
-    w = w / w.sum()
-    mu = X @ w                                           # (N,)
-    maf_by_superpop['af_variance_weighted'] = ((X - mu[:, None])**2 * w[None, :]).sum(axis=1)
-    maf_by_superpop['af_var_quartile'] = (pd.qcut(maf_by_superpop['af_variance_weighted'], 4, labels=[0.00, 0.25, 0.50, 0.75]))
-    maf_by_superpop['ps'] = maf_by_superpop['af_var_quartile'].map({0.00: False, 0.75: True})
+    markers_assoc_dict = {} # names of the markers that are associated with each subgroup
+    if g_ps !=0:
+        # calculate weighted af variance
+        w = igsr_samples['Superpopulation code'].value_counts().to_numpy(float)
+        w_code_index = igsr_samples['Superpopulation code'].value_counts().index
+        X = maf_by_superpop[w_code_index].to_numpy(float)  
+        
+        w = w / w.sum()
+        mu = X @ w                                           # (N,)
+        maf_by_superpop['af_variance_weighted'] = ((X - mu[:, None])**2 * w[None, :]).sum(axis=1)
+        maf_by_superpop['af_var_quartile'] = (pd.qcut(maf_by_superpop['af_variance_weighted'], 4, labels=[0.00, 0.25, 0.50, 0.75]))
+        keep_samples = '' # keep all samples
+        # select markers
+        for genetic_subgroup in range(2):
+            assert g_ps in [0.25,0.5,0.75], f"g_ps {g_ps} value not in {0.25,0.5,0.75}, right now code only taking these quartiles"
+            markers_assoc = maf_by_superpop[maf_by_superpop['af_var_quartile']==g_ps].sample(n=g, replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist()
+            markers_assoc_dict[genetic_subgroup] = markers_assoc
+        # select num_markers-markers assoc extra markers for analysis (G)
+        all_markers_assoc = set(sum(markers_assoc_dict.values(), []))
+        extra_markers = (maf_by_superpop[(maf_by_superpop['af_var_quartile']==g_ps)&(~maf_by_superpop['SNP'].isin(all_markers_assoc))]
+                        .sample(n=num_markers-len(all_markers_assoc), replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist())
+    else:
+        eur_samples = igsr_samples[igsr_samples['Superpopulation code']=='EUR']['IID'].values.tolist()
+        # keep for european samples
+        with open(f'{intermediate_file_dir}/eursamples_{intermediate_file_suffix}.txt','w') as f:
+            for iid in eur_samples:
+                f.write(iid + "\t" + iid + "\n")
+        keep_samples = f'--keep {intermediate_file_dir}/eursamples_{intermediate_file_suffix}.txt'
 
+        # select markers
+        for genetic_subgroup in range(2):
+            markers_assoc = maf_by_superpop[maf_by_superpop['EUR']>=0.05].sample(n=g, replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist() # at least 5% AF in EUR population
+            markers_assoc_dict[genetic_subgroup] = markers_assoc
+        # select num_markers-markers assoc extra markers for analysis (G)
+        all_markers_assoc = set(sum(markers_assoc_dict.values(), []))
+        extra_markers = (maf_by_superpop[(maf_by_superpop['EUR']>=0.05)&(~maf_by_superpop['SNP'].isin(all_markers_assoc))]
+                .sample(n=num_markers-len(all_markers_assoc), replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist())
+    
     # 2. Generate genetic subgroups
     genetic_subgroups = []
-    markers_assoc_dict = {} # names of the markers that are associated with each subgroup
     for genetic_subgroup in range(2):
-        # Select SNP group based on g and ps 
-        assert maf_by_superpop[maf_by_superpop['ps']==ps].shape[0]>g, f"number of genetic features linked ({g}) is too large, only {maf_by_superpop[maf_by_superpop['ps']==ps].shape[0]} markers in quartile {ps} group"
-        markers_assoc = maf_by_superpop[maf_by_superpop['ps']==ps].sample(n=g, replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist()
-        markers_assoc_dict[genetic_subgroup] = markers_assoc
+        markers_assoc = markers_assoc_dict[genetic_subgroup]
         assert len(set(markers_assoc))==len(markers_assoc) # make sure ped file has unique rows
 
         # extract selected markers
@@ -164,6 +188,7 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
         plink_extract = f'''
         module load plink/1.9 && plink --bfile {bfile_path} \
             --extract {intermediate_file_dir}/markers_assoc_g{genetic_subgroup}_{intermediate_file_suffix}.txt \
+            {keep_samples} \
             --make-bed \
             --recode A \
             --out {intermediate_file_dir}/subset_markers_g{genetic_subgroup}_{intermediate_file_suffix}
@@ -191,28 +216,19 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
                   .pipe(lambda s: s[s > 1]).index)
     genetic_subgroups = genetic_subgroups[~genetic_subgroups['IID'].isin(overlap_iids)].copy()
 
-    # select num_markers-markers assoc extra markers for analysis (G)
-    all_markers_assoc = set(sum(markers_assoc_dict.values(), []))
-    extra_markers = (maf_by_superpop[(maf_by_superpop['ps']==ps)&(~maf_by_superpop['SNP'].isin(all_markers_assoc))]
-                    .sample(n=num_markers-len(all_markers_assoc), replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist())
-    assert len(all_markers_assoc) + len(extra_markers) == num_markers
-
 
     # 3. Generate phenotypic subgroups
-    fam_df = pd.read_csv(f'{bfile_path}.fam',sep='\s+',header=None)
+    fam_df = pd.read_csv(f'{intermediate_file_dir}/subset_markers_g{genetic_subgroup}_{intermediate_file_suffix}.fam',sep='\s+',header=None)
     fam_df.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
     iid_order = [i for i in fam_df['IID'].values if i not in overlap_iids]
     gi_phenotypic_subgroups = []
     for phenotypic_subgroup in range(2): 
-        phenotypic_subgroup_df = genetic_subgroups[genetic_subgroups['genetic_subgroup']==phenotypic_subgroup][['IID','z']].copy()
+        phenotypic_subgroup_df = genetic_subgroups[genetic_subgroups['genetic_subgroup']==phenotypic_subgroup][['IID','r']].copy()
         phenotypic_subgroup_df['phenotypic_subgroup'] = phenotypic_subgroup
         phenotypic_subgroup_df = phenotypic_subgroup_df.merge(igsr_samples[['IID','Superpopulation code']],on='IID',how='inner')
         # corresponding genetic subgroup value for r
-        if ps:
-            phenotypic_subgroup_df['superpop_shift'] = phenotypic_subgroup_df['Superpopulation code'].map({sp: streams["ps_noise"].uniform(-0.1, 0.1) for sp in phenotypic_subgroup_df['Superpopulation code'].unique()})
-        else:
-            phenotypic_subgroup_df['superpop_shift'] = 0
-        phenotypic_subgroup_df['subgroup'] = phenotypic_subgroup_df['r']*e + streams["env_noise"].normal(loc=0,scale=1,size=phenotypic_subgroup_df.shape[0]) + phenotypic_subgroup_df["superpop_shift"]> phenotypic_subgroup_df['r'].quantile(0.8)*e
+        phenotypic_subgroup_df['superpop_shift'] = phenotypic_subgroup_df['Superpopulation code'].map({sp: streams["ps_noise"].uniform(-c_ps, c_ps) for sp in phenotypic_subgroup_df['Superpopulation code'].unique()})
+        phenotypic_subgroup_df['subgroup'] = (1/num_markers)*phenotypic_subgroup_df['r']*e + streams["env_noise"].normal(loc=0,scale=1,size=phenotypic_subgroup_df.shape[0]) + phenotypic_subgroup_df["superpop_shift"]> (1/num_markers)*phenotypic_subgroup_df['r'].quantile(0.8)*e
         gi_phenotypic_subgroups.append(phenotypic_subgroup_df)
     gi_phenotypic_subgroups = pd.concat(gi_phenotypic_subgroups)
     # remove overlapping samples in phenotypic subgroups 0 and 1
@@ -238,6 +254,7 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
     phenotypic_subgroups = pd.concat([gi_phenotypic_subgroups,non_gi_phenotypic_subgroups])
 
     # extract all markers & correct individuals for final G
+    assert len(all_markers_assoc) + len(extra_markers) == num_markers
     with open(f'{intermediate_file_dir}/allmarkers_{intermediate_file_suffix}.txt','w') as f:
         for snp in extra_markers:
             f.write(snp + "\n")
@@ -261,15 +278,13 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
 
     # 4. simulate M binary clinical features
     # start with baseline probabilities
-    if ps:
-        sp2bump = {sp: streams["ps_noise"].uniform(-0.2, 0.2)
-            for sp in igsr_samples['Superpopulation code'].unique()}
-        subj_bump = (igsr_samples
-                    .set_index('IID')['Superpopulation code']
-                    .reindex(iid_order).map(sp2bump).to_numpy())  # shape (n,)
-    else: 
-        subj_bump = np.zeros(len(iid_order), dtype=float) 
-    clip01 = lambda x: np.clip(x, 1e-6, 0.999)
+    sp2bump = {sp: streams["ps_noise"].uniform(-c_ps, c_ps)
+        for sp in igsr_samples['Superpopulation code'].unique()}
+    subj_bump = (igsr_samples
+                .set_index('IID')['Superpopulation code']
+                .reindex(iid_order).map(sp2bump).to_numpy())  # shape (n,)
+
+    clip01 = lambda x: np.clip(x, 1e-6, None)
 
     # baseline (add ps bump, broadcast across M)
     C = streams["poisson"].poisson(clip01(0.1 + subj_bump)[:, None], size=(len(iid_order), M))
@@ -314,13 +329,13 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
 
 ### FUNCTIONS FOR DATA SIM EVALUATION:
 
-# UMAP RELATED
+# PCA RELATED
 def clean_join(values):
     # remove empty strings
     vals = sorted(set(v for v in values if v != ''), key=lambda x: int(x))
     return ','.join(vals)
 
-def generate_umap_plot(mode, var_list, color_col, color_label, output_dir, graph_dir, igsr_samples_filepath=None): 
+def generate_pca_plot(mode, var_list, color_col, color_label, output_dir, graph_dir, igsr_samples_filepath=None): 
     '''Generate UMAP plot of C across different values of variable spcified in 'mode' 
     (values in var_list), colored by color_df (which must have a column IID)
     
@@ -346,12 +361,12 @@ def generate_umap_plot(mode, var_list, color_col, color_label, output_dir, graph
             genetic_subgroups_concat["IID"] = pd.Categorical(genetic_subgroups_concat["IID"], categories=iid_order, ordered=True)
             color_df = genetic_subgroups_concat.copy()
         C = np.load(f'{output_dir}/C_{output_file_suffix}.npy')# pick e=0.5
-        C_scaled = StandardScaler().fit_transform(C) # standardize matrix before UMAP
+        C_scaled = StandardScaler().fit_transform(C) # standardize matrix before PCA
 
-        reducer = umap.UMAP()
-        embedding = reducer.fit_transform(C_scaled)
+        pca = PCA(n_components=2, random_state=0)     # choose target dims
+        embedding = pca.fit_transform(C_scaled) 
 
-        plot_df = (pd.DataFrame(embedding, columns=["UMAP1", "UMAP2"], index=iid_order).
+        plot_df = (pd.DataFrame(embedding, columns=["PC1", "PC2"], index=iid_order).
                     rename_axis("IID").reset_index().merge(color_df[['IID',color_col]], on='IID',how='inner'))
         
         assert plot_df[plot_df[color_col].isna()].shape[0] == 0
@@ -361,18 +376,18 @@ def generate_umap_plot(mode, var_list, color_col, color_label, output_dir, graph
 
     # --- Plot with plotnine ---
     if mode == 'ps':
-        title = r"UMAP of clinical data at different $p_s$ levels"
+        title = r"PCA of clinical data at different $p_s$ levels"
     else:
-        title = r"UMAP of clinical data at different e levels"
+        title = r"PCA of clinical data at different e levels"
     p = (
-        ggplot(plot_dfs, aes("UMAP1", "UMAP2", color=color_col))
+        ggplot(plot_dfs, aes("PC1", "PC2", color=color_col))
         + geom_point(alpha=0.5, size=2)
         + labs(title=title, color=color_label)
         + facet_wrap(f'~{mode}',ncol=2,scales='free')
         + theme_minimal()
         + theme(legend_title=element_text(size=9))
     )
-    p.save(f'{graph_dir}/umap_clinical_{mode}.pdf',dpi=300)
+    p.save(f'{graph_dir}/pca_clinical_{mode}.pdf',dpi=300)
 
 # GWAS RELATED
 
@@ -422,7 +437,6 @@ def run_plink_gwas(bfile, covariate_file, phenotype_file, out):
     plink_results["OR"] = pd.to_numeric(plink_results["OR"])
     plink_results.to_parquet(f'{out}.parquet', engine='pyarrow') # export to parquet format for quicker lookup later on
     # clean up for storage space
-    os.remove(f'{out}.log')
     os.remove(f'{out}.Phenotype.glm.logistic.hybrid')
 
 # saige gwas
@@ -642,8 +656,8 @@ def run_phenotypicsubgroup_gwas(output_dir,output_file_suffix,intermediate_plink
 
 
 # evaluate gwas
-def evaluate_gwas(output_dir,ps, e, dataset, g, phenotypic_subgroup,sig_level=5e-8):
-    output_file_suffix = get_output_file_suffix(ps, e, dataset, g)
+def evaluate_gwas(output_dir,g_ps,c_ps, e, dataset, phenotypic_subgroup,sig_level=5e-8):
+    output_file_suffix = get_output_file_suffix(e=e,g_ps=g_ps,c_ps=c_ps,dataset=dataset)
     meta_path = f"{output_dir}/simulation_metadata_{output_file_suffix}.pkl"
     with open(meta_path, "rb") as f:
         simulation_metadata = pickle.load(f)
@@ -653,7 +667,7 @@ def evaluate_gwas(output_dir,ps, e, dataset, g, phenotypic_subgroup,sig_level=5e
     df = pd.read_parquet(f"{output_dir}/GWAS_RESULTS/PhenotypicSubgroup{phenotypic_subgroup}_{output_file_suffix}.parquet")    
    
     # get confusion matrix
-    df = df.assign(is_assoc = df["ID"].isin(associated_markers),is_sig   = df["P"] < 5e-8)
+    df = df.assign(is_assoc = df["ID"].isin(associated_markers),is_sig   = df["P"] < sig_level)
     conf_by_method = (
         df.groupby("assoc_test",group_keys=False)
         .apply(lambda g: pd.Series({
@@ -690,10 +704,10 @@ def evaluate_gwas(output_dir,ps, e, dataset, g, phenotypic_subgroup,sig_level=5e
     results_df = results_df.merge(conf_by_method,on='assoc_test')
 
     # set param values
-    results_df['ps'] = ps
+    results_df['g_ps'] = g_ps
+    results_df['c_ps'] = c_ps
     results_df['e'] = e
     results_df['dataset'] = dataset
-    results_df['g'] = g
     results_df['phenotypic_subgroup'] = phenotypic_subgroup
 
     return results_df

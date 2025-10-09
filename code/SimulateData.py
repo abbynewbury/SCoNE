@@ -2,7 +2,7 @@
 #SBATCH --job-name=SimulateData
 #SBATCH --nodes=1
 #SBATCH --mem=30G
-#SBATCH --cpus-per-task=24
+#SBATCH --cpus-per-task=8
 #SBATCH --time=120:00:00
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=anewbury@nygenome.org
@@ -40,14 +40,18 @@ from simulations.genomes1000_sim import *
 
 
 # PARAMETERS
-generate_sim = True
-evaluate_sim = False 
-run_gwas = False  # only will run if run_gwas=True AND evaluate_sim=True 
-# generate all combinations of e and ps variables
-ps_list = [True,False]
+generate_sim = False
+evaluate_sim = True 
+run_gwas = True  # only will run if run_gwas=True AND evaluate_sim=True 
+# generate all combinations for 5 scenarios
+g = 10 # 10 linked markers
 e_list = [0.25, 0.50, 0.75, 1]
-g_list = [10] # g represents the number of linked markers
 dataset_list = range(11) # 11 random datasets for each combination
+combos = []
+for e in e_list:
+    for g_ps,c_ps in [(0,0),(.25,.1),(.25,.3),(.75,.1),(.75,.3)]:
+        for dataset in dataset_list:
+            combos.append((e,g_ps,c_ps,dataset))
 # PARAMETERS
 
 
@@ -61,7 +65,6 @@ if generate_sim:
     maf_by_superpop = calculate_maf_by_superpop(igsr_samples_filepath,intermediate_plink_dir,bfile_path=f'{output_dir}/G',output=maf_by_superpop_filepath)
     # RUN FILE SETUP
     
-    combos = list(product(ps_list, e_list, dataset_list, g_list))
     child_ss = np.random.SeedSequence().spawn(len(combos)) 
     run_seeds = [int(np.random.default_rng(ss).integers(1, 2**31 - 1)) for ss in child_ss] # for reproducible randomness
     # 11 random datasets each
@@ -71,6 +74,7 @@ if generate_sim:
         igsr_samples_filepath = igsr_samples_filepath,
         intermediate_file_dir=intermediate_plink_dir,
         output_dir=output_dir,
+        g=g,
         extra_subgroups_size=200,
         M=100,
         num_clinical_assoc=10,
@@ -79,24 +83,24 @@ if generate_sim:
 
     results = Parallel(n_jobs=-1)(
         delayed(run_one)(
-            ps=ps, e=e, g=g, intermediate_file_suffix=get_output_file_suffix(ps,e,dataset,g),
-              output_file_suffix=get_output_file_suffix(ps,e,dataset,g),run_seed=run_seeds[i]) 
-            for i, (ps, e, dataset, g) in enumerate(combos)
+            g_ps=g_ps, c_ps=c_ps, e=e, intermediate_file_suffix=get_output_file_suffix(e,g_ps,c_ps,dataset),
+              output_file_suffix=get_output_file_suffix(e,g_ps,c_ps,dataset),run_seed=run_seeds[i]) 
+            for i, (e,g_ps,c_ps,dataset) in enumerate(combos)
         )
 
 
 # EVALUATE SIMULATED DATA
 
-if evaluate_sim:
-# VISUAL EVALUATION (UMAP)
-    # For ps
-    generate_umap_plot(mode='ps', var_list=ps_list, color_col='Superpopulation code', 
-                            color_label='Superpopulation', output_dir=output_dir,
-                            graph_dir=graph_dir,igsr_samples_filepath=igsr_samples_filepath)
+if evaluate_sim: 
+# # VISUAL EVALUATION (UMAP)
+#     # For ps
+#     generate_umap_plot(mode='ps', var_list=ps_list, color_col='Superpopulation code', 
+#                             color_label='Superpopulation', output_dir=output_dir,
+#                             graph_dir=graph_dir,igsr_samples_filepath=igsr_samples_filepath)
 
-    # For e
-    generate_umap_plot(mode='e', var_list=e_list, color_col='subgroup_value', 
-                            color_label='Genetic Subgroup', output_dir=output_dir,graph_dir=graph_dir)
+#     # For e
+#     generate_umap_plot(mode='e', var_list=e_list, color_col='subgroup_value', 
+#                             color_label='Genetic Subgroup', output_dir=output_dir,graph_dir=graph_dir)
 
 
 # QUANTITATIVE EVALUATION (GWAS)
@@ -110,7 +114,7 @@ if evaluate_sim:
         pcs = pd.read_csv(f'{output_dir}/pcs.txt',sep='\t')
         covar = pcs.merge(igsr_samples[['IID','Sex']], on='IID',how='inner')
         # probably cleaner way to do this
-        covar[['FID','IID']+[f'PC{i}' for i in range(1,11)]+['Sex']].set_index('FID').to_csv(f'{output_dir}/COVARIATE_FILE')
+        covar[['FID','IID']+[f'PC{i}' for i in range(1,6)]+['Sex']].set_index('FID').to_csv(f'{output_dir}/COVARIATE_FILE')
 
 
         # run gwas phenotypic subgroup ~ genotypes + age + pcs (plink w/out covs, plink w/ covs, saige w/ covs)
@@ -123,81 +127,81 @@ if evaluate_sim:
 
         results = Parallel(n_jobs=24)(
             delayed(run_one)(
-                output_file_suffix=get_output_file_suffix(ps,e,dataset,g), phenotypic_subgroup=phenotypic_subgroup) 
-                for ps, e, dataset, g,  phenotypic_subgroup  in product(ps_list, [0.50,1], dataset_list, g_list,range(4))
+                output_file_suffix=get_output_file_suffix(e,g_ps,c_ps,dataset), phenotypic_subgroup=phenotypic_subgroup) 
+                for e,g_ps,c_ps,dataset, phenotypic_subgroup  in ( (*x, y) for x, y in product(combos, range(4)) )
             )
         
-    # make plots evaluating gwas
-    combos = list(product(ps_list, [0.50,1], dataset_list, g_list, range(4)))
+    # make plots evaluating  # TODO: switch
     results_df_indiv = Parallel(n_jobs=-1)(
         delayed(evaluate_gwas)(
             output_dir=output_dir,
-            ps=ps, e=e, dataset=dataset, g=g, 
+            g_ps=g_ps,c_ps=c_ps, e=e, dataset=dataset,
             phenotypic_subgroup=phenotypic_subgroup, sig_level=5e-8
         )
-        for (ps, e, dataset, g, phenotypic_subgroup) in combos
+        for e,g_ps,c_ps,dataset, phenotypic_subgroup  in ( (*x, y) for x, y in product(combos, range(4)) )
     )
 
     results_df = pd.concat(results_df_indiv)
+    results_df.to_csv(f'{output_dir}/results_df.csv') # TODO: remove later and bring back graphs
 
-    # plot of mean abs(beta) for linked markers
-    p = (ggplot(results_df[results_df['assoc_test']!='LR'], aes(x='ps', y='avg_abs_beta_assoc',fill='factor(e)'))
-    + geom_boxplot()
-    + theme_minimal()
-    + theme(figure_size=(12,8))
-    + facet_grid('assoc_test ~ g')
-    + labs(title=r'Mean abs($\beta$) of Linked Markers',y=r'Mean abs($\beta$)',x=r'$p_s$')) 
-    p.save(f"{graph_dir}/SimValidation_avgbeta_linked.png", dpi=300)
+    # # plot of mean abs(beta) for linked markers
+    # p = (ggplot(results_df[results_df['assoc_test']!='LR'], aes(x='ps', y='avg_abs_beta_assoc',fill='factor(e)'))
+    # + geom_boxplot()
+    # + theme_minimal()
+    # + theme(figure_size=(12,8))
+    # + facet_grid('assoc_test ~ g')
+    # + labs(title=r'Mean abs($\beta$) of Linked Markers',y=r'Mean abs($\beta$)',x=r'$g_{ps}$')) 
+    # p.save(f"{graph_dir}/SimValidation_avgbeta_linked.png", dpi=300)
 
-    p = (ggplot(results_df[results_df['assoc_test']=='LR'], aes(x='ps', y='avg_abs_beta_assoc',fill='factor(e)'))
-    + geom_boxplot()
-    + theme_minimal()
-    + theme(figure_size=(12,4))
-    + facet_grid('assoc_test ~ g')
-    + labs(title=r'Mean abs($\beta$) of Linked Markers',y=r'Mean abs($\beta$)',x=r'$p_s$')) 
-    p.save(f"{graph_dir}/SimValidation_avgbeta_linked_LR.png", dpi=300)
+    # p = (ggplot(results_df[results_df['assoc_test']=='LR'], aes(x='ps', y='avg_abs_beta_assoc',fill='factor(e)'))
+    # + geom_boxplot()
+    # + theme_minimal()
+    # + theme(figure_size=(12,4))
+    # + facet_grid('assoc_test ~ g')
+    # + labs(title=r'Mean abs($\beta$) of Linked Markers',y=r'Mean abs($\beta$)',x=r'$p_s$')) 
+    # p.save(f"{graph_dir}/SimValidation_avgbeta_linked_LR.png", dpi=300)
 
-    # plot representing confounding
-    results_df['subgroup_type'] = results_df['phenotypic_subgroup'].apply(lambda x: 'genetic link subgroup' if x in range(2) else 'random subgroup')
-    p = (ggplot(results_df[results_df['assoc_test']!='LR'], aes(x='ps', y='prop_rel_change_gt10',fill='factor(e)'))
-        + geom_boxplot()
-        + theme_minimal()
-        + theme(figure_size=(12,8))
-        + facet_grid('assoc_test ~ subgroup_type')
-        + labs(title=r'% of All Markers w/ relative change in $\beta$ > $ \pm $ 10% vs. simple LR',y=r'Proportion',x=r'$p_s$')) 
-    p.save(f"{graph_dir}/SimValidation_confounding_pctchange.png", dpi=300)
+    # # plot representing confounding
+    # results_df['subgroup_type'] = results_df['phenotypic_subgroup'].apply(lambda x: 'genetic link subgroup' if x in range(2) else 'random subgroup')
+    # p = (ggplot(results_df[results_df['assoc_test']!='LR'], aes(x='ps', y='prop_rel_change_gt10',fill='factor(e)'))
+    #     + geom_boxplot()
+    #     + theme_minimal()
+    #     + theme(figure_size=(12,8))
+    #     + facet_grid('assoc_test ~ subgroup_type')
+    #     + labs(title=r'% of All Markers w/ relative change in $\beta$ > $ \pm $ 10% vs. simple LR',y=r'Proportion',x=r'$p_s$')) 
+    # p.save(f"{graph_dir}/SimValidation_confounding_pctchange.png", dpi=300)
 
-    # performance metrics
-    p = (ggplot(results_df, aes(x='ps', y='accuracy',fill='factor(e)'))
-    + geom_boxplot()
-    + theme_minimal()
-    + theme(figure_size=(16,8))
-    + facet_grid('assoc_test ~ subgroup_type')
-    + labs(title=r'Accuracy in identifying linked markers',y=r'Accuracy',x=r'$p_s$')) 
-    p.save(f"{graph_dir}/SimValidation_accuracy.png", dpi=300)
+    # # performance metrics
+    # p = (ggplot(results_df, aes(x='ps', y='accuracy',fill='factor(e)'))
+    # + geom_boxplot()
+    # + theme_minimal()
+    # + theme(figure_size=(16,8))
+    # + facet_grid('assoc_test ~ subgroup_type')
+    # + labs(title=r'Accuracy in identifying linked markers',y=r'Accuracy',x=r'$p_s$')) 
+    # p.save(f"{graph_dir}/SimValidation_accuracy.png", dpi=300)
 
-    p = (ggplot(results_df, aes(x='ps', y='recall',fill='factor(e)'))
-    + geom_boxplot()
-    + theme_minimal()
-    + theme(figure_size=(16,8))
-    + facet_grid('assoc_test ~ subgroup_type')
-    + labs(title=r'Sensitivity in identifying linked markers',y=r'Sensitivity',x=r'$p_s$')) 
-    p.save(f"{graph_dir}/SimValidation_sensitivity.png", dpi=300)
+    # p = (ggplot(results_df, aes(x='ps', y='recall',fill='factor(e)'))
+    # + geom_boxplot()
+    # + theme_minimal()
+    # + theme(figure_size=(16,8))
+    # + facet_grid('assoc_test ~ subgroup_type')
+    # + labs(title=r'Sensitivity in identifying linked markers',y=r'Sensitivity',x=r'$p_s$')) 
+    # p.save(f"{graph_dir}/SimValidation_sensitivity.png", dpi=300)
 
-    p = (ggplot(results_df, aes(x='ps', y='specificity',fill='factor(e)'))
-    + geom_boxplot()
-    + theme_minimal()
-    + theme(figure_size=(16,8))
-    + facet_grid('assoc_test ~ subgroup_type')
-    + labs(title=r'Specificity in identifying linked markers',y=r'Specificity',x=r'$p_s$')) 
-    p.save(f"{graph_dir}/SimValidation_specificity.png", dpi=300)
+    # p = (ggplot(results_df, aes(x='ps', y='specificity',fill='factor(e)'))
+    # + geom_boxplot()
+    # + theme_minimal()
+    # + theme(figure_size=(16,8))
+    # + facet_grid('assoc_test ~ subgroup_type')
+    # + labs(title=r'Specificity in identifying linked markers',y=r'Specificity',x=r'$p_s$')) 
+    # p.save(f"{graph_dir}/SimValidation_specificity.png", dpi=300)
 
-    results_df['pred_pos'] = results_df['tp'] + results_df['fp'] 
-    p = (ggplot(results_df, aes(x='ps', y='pred_pos',fill='factor(e)'))
-    + geom_boxplot()
-    + theme_minimal()
-    + theme(figure_size=(16,8))
-    + facet_grid('assoc_test ~ subgroup_type',scales='free_y')
-    + labs(title=r'# GWAS Hits',y=r'# GWAS Hits',x=r'$p_s$')) 
-    p.save(f"{graph_dir}/SimValidation_numgwashits.png", dpi=300)
+    # results_df['pred_pos'] = results_df['tp'] + results_df['fp'] 
+    # p = (ggplot(results_df, aes(x='ps', y='pred_pos',fill='factor(e)'))
+    # + geom_boxplot()
+    # + theme_minimal()
+    # + theme(figure_size=(16,8))
+    # + facet_grid('assoc_test ~ subgroup_type',scales='free_y')
+    # + labs(title=r'# GWAS Hits',y=r'# GWAS Hits',x=r'$p_s$')) 
+    # p.save(f"{graph_dir}/SimValidation_numgwashits.png", dpi=300)
     

@@ -49,58 +49,49 @@ import algorithms.MVBCWrapper as MVBCWrapper
 import algorithms.MLFlowWrapper as MLFlowWrapper
 import evaluation.cluster_evaluation as cluster_evaluation
 import importlib
+np.random.seed(42)
 
 # PARAMETERS
-# generate all combinations of e and ps variables
-ps_list = [True,False]
-e_list = [0.25, 0.50, 0.75, 1]
-g_list = [10] 
+# generate all combinations of e and g_ps, c_ps variables
+e_list = [0.25, 0.50, 0.75, 1] 
+ps_list = [(0,0),(.25,.1),(.25,.3),(.75,.1),(.75,.3)]  #for g_ps, c_ps
 dataset_list = range(11) # 11 random datasets for each combination 
-num_markers = 100
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
 rank = 3
-tuning = False # to run sparsity tuning step
+num_markers = 100
+tuning = True # to run sparsity tuning step
 testing = True # to run testing step
 # PARAMETERS
-np.random.seed(42)
 
 # read in Z
-igsr_samples = sim_functions.read_in_igsr_samples(igsr_samples_filepath, bfile_path=f'{sim_output_dir}/G')
-igsr_samples['Sex'] = igsr_samples['Sex'].map({'female': 0, 'male': 1})
-
-admixture = pd.read_csv(f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.Q',sep='\s+',header=None)
-fam_df = pd.read_csv(f'{sim_output_dir}/G.fam',sep='\s+',header=None)
-fam_df.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
-admixture['IID'] = fam_df['IID'].values
-Z_df = admixture.merge(igsr_samples[['IID']], on='IID',how='inner') # not including covar Sex
-Z = Z_df[[i for i in Z_df.columns if i!='IID']].to_numpy()
+Z_df = pd.read_csv(f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.Q',sep='\s+',header=None)
+Z = Z_df[[i for i in Z_df.columns if i!='IID']].to_numpy() 
 
 
 
 def _call_kwargs(kw):
     return run_one_wrapper(**kw)  # expands kwargs dict
 
-def run_one_wrapper(ps, e, dataset, g, num_init,
-                    Z,rank,
-                    W, H_G, H_C, U_G, U_C,
+def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
+                    Z,rank,num_markers,
                     lambda_W, lambda_H_G, lambda_H_C,lambda_Gloss,
                     G_loss_type, C_loss_type,
                     max_outer,min_outer,tol,nonneg,
                     sim_output_dir, exp_num,run_name,artifact_dir): 
-    output_suffix = sim_functions.get_output_file_suffix(ps=ps, e=e, dataset=dataset, g=g)
+    output_suffix = sim_functions.get_output_file_suffix(g_ps=g_ps, c_ps=c_ps, e=e, dataset=dataset)
     print(f"{sim_output_dir}/simulation_metadata_{output_suffix}.pkl")
     C_path = f'{sim_output_dir}/C_{output_suffix}.npy'
     C = np.load(C_path)
     with open(f"{sim_output_dir}/simulation_metadata_{output_suffix}.pkl", "rb") as f:
         simulation_metadata = pickle.load(f)
-    fam_df = pd.read_csv(f'{bfile_path}.fam',sep='\s+',header=None)
+    fam_df = pd.read_csv(f'{bfile_path}.fam',sep='\s+',header=None) 
     fam_df.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
     iid_index = fam_df[fam_df['IID'].isin(simulation_metadata['iid_order'])].index # some samples removed due to overlap btwn subgroups, need correct length
     # read in G with num_markers
-    G_path = f'{sim_output_dir}/G_{sim_functions.get_output_file_suffix(ps,e,dataset,g)}.raw'
+    G_path = f'{sim_output_dir}/G_{output_suffix}.raw'
     G = np.loadtxt(G_path,  usecols=range(6, num_markers+6), dtype=np.int8, skiprows=1)
-    fam_df_subset = pd.read_csv(f'{sim_output_dir}/G_{sim_functions.get_output_file_suffix(ps,e,dataset,g)}.fam',sep='\s+',header=None)
+    fam_df_subset = pd.read_csv(f'{sim_output_dir}/G_{output_suffix}.fam',sep='\s+',header=None)
     fam_df_subset.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
     assert set(fam_df_subset['IID'].values).issubset(set(fam_df['IID'].values))
     # Note: first two columns are genetically-informed subgroups by construction
@@ -121,7 +112,7 @@ def run_one_wrapper(ps, e, dataset, g, num_init,
                                "method":'L-BFGS-B', "options":{'maxcor':10,'maxiter':10,'gtol':1e-5,'maxls':5,'ftol':1e-6},  # keep scipy methods and options fixed
                                "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
                                "max_outer":max_outer, "min_outer":min_outer, "tol":tol, "nonneg":nonneg},
-        params={"ps": ps, "e": e, "dataset": dataset, "g": g, "init":init,
+        params={"g_ps": g_ps,"c_ps":c_ps, "e": e, "dataset": dataset, "num_init":num_init,
                 "run_seed": simulation_metadata["run_seed"], "tol": tol, "max_outer": max_outer, "min_outer":min_outer,
                 "lambda_W": lambda_W, "lambda_H_G": lambda_H_G, "lambda_H_C": lambda_H_C, "lambda_Gloss":lambda_Gloss, "run_name":run_name,
                 "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
@@ -135,21 +126,43 @@ def run_one_wrapper(ps, e, dataset, g, num_init,
         run_name=run_name,
         algorithm_func_kwargs={"G_path":G_path,"C_path":C_path, "rank":rank,
                     "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C, "r_path":r_path},
-        params={"ps": ps, "e": e, "dataset": dataset, "g": g,
-        "run_name":run_name},
+        params={"g_ps": g_ps,"c_ps":c_ps, "e": e, "dataset": dataset,
+        "run_name":run_name, "num_init":1,
+        "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C},
         eval_fn=cluster_evaluation.compute_sim_metrics, 
         ground_truth=ground_truth,
         experiment_name=str(exp_num))
     elif run_name == 'RGWAS':
         Z_path = f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.Q'
-        iid_index_path = f'{sim_output_dir}/iid_index_{sim_functions.get_output_file_suffix(ps,e,dataset,g)}.npy'
+        # save iid index
+        iid_index_path = f'{sim_output_dir}/iid_index_{output_suffix}.npy'
+        np.save(iid_index_path,iid_index.to_numpy())
+        if len(iid_index)<500: # need to subset to only linked features 
+            clinical_assoc = list(set([x for sub in simulation_metadata['clinical_assoc']['indices'].values.tolist() for x in sub]))
+            C_subset = C[:,clinical_assoc] 
+            np.save(f'{sim_output_dir}/C_subset_{output_suffix}.npy', C_subset)
+            C_path= f'{sim_output_dir}/C_subset_{output_suffix}.npy'
+
+            markers_assoc = list(set([x for sub in simulation_metadata['markers_assoc'].values() for x in sub]))
+            with open(f'{sim_output_dir}/markers_assoc_G_subset_{output_suffix}.txt','w') as f:
+                for snp in markers_assoc:
+                    f.write(snp + "\n")
+            plink_extract = f'''
+                module load plink/1.9 && plink --bfile {sim_output_dir}/G_{output_suffix} \
+                    --recode A \
+                    --extract {sim_output_dir}/markers_assoc_G_subset_{output_suffix}.txt\
+                    --out {sim_output_dir}/G_subset_{output_suffix}
+                '''
+            result = subprocess.run(plink_extract, shell=True, check=True, executable="/bin/bash")
+            G_path=f'{sim_output_dir}/G_subset_{output_suffix}.raw'
+
         return  MLFlowWrapper.train_with_mlflow(algorithm_func=RGWASWrapper.RGWASWrapper,
         artifact_dir=artifact_dir,
         run_name=run_name,
         algorithm_func_kwargs={"iid_index_path":iid_index_path,"r_path":r_path, "G_path":G_path,
-                        "C_path":C_path, "Z_path":Z_path, "iid_index":iid_index, "num_init":init,"rank":rank},
-        params={"ps": ps, "e": e, "dataset": dataset, "g": g,
-        "run_name":run_name},
+                        "C_path":C_path, "Z_path":Z_path, "num_init":num_init,"rank":rank},
+        params={"g_ps": g_ps,"c_ps":c_ps, "e": e, "dataset": dataset,
+        "run_name":run_name, "num_init":num_init},
         eval_fn=cluster_evaluation.compute_sim_metrics, 
         ground_truth=ground_truth,
         experiment_name=str(exp_num))
@@ -163,8 +176,8 @@ os.makedirs(f"{os.path.dirname(artifact_dir)}/logs_tuning", exist_ok=True)
 # PRELIMINARY: set up fixed params across experiments
 exp_map = {}
 tuning_dataset = {}
-for i, (ps, e, g) in enumerate(product(ps_list, e_list, g_list)):
-    key = (ps, e, g)
+for i, ((g_ps,c_ps),e) in enumerate(product(ps_list, e_list)):
+    key = (g_ps,c_ps, e)
     tuning_dataset[key] = np.random.randint(0, 11)
     exp_map[key] = i
 # submit as a SLURM array (adjust params as needed)
@@ -184,29 +197,33 @@ executor.update_parameters(
         "mail-user": "anewbury@nygenome.org",
     },
 )
+# tuning_runs = ['SCoNE','SCoNE(Fro)','sHNMF','MVBC']  # all of these runs have sparsity parameters that need to be tuned # TODO: put back
+# testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','RGWAS','MVBC']
+tuning_runs = ['MVBC']
+testing_runs = ['MVBC','RGWAS']
+# PRELIMINARY: set up fixed params across experiments
 
 # STEP 1: hparam tuning with 1 randomly selected dataset per experiment (and then remove it from testing)
 if tuning:
-    combos = [(ps, e, g, lW, lHG, lHC, rn)
-    for ps, e, g, lW, lHG, lHC, rn in product(
-        ps_list, e_list, g_list, [0,0.3,0.5,1],[0,0.3,0.5,1],[0,0.3,0.5,1], ['SCoNE','SCoNE(Fro)','sHNMF']
-    ) if (lW, lHG, lHC) != (0, 0, 0)]
+    combos = [(g_ps, c_ps, e, lW, lHG, lHC, rn)
+    for ((g_ps,c_ps), e, lW, lHG, lHC, rn) in product(
+        ps_list, e_list, [0,0.3,0.5,1],[0,0.3,0.5,1],[0,0.3,0.5,1], tuning_runs)]
 
     cfgs = [
         dict(
-            ps=ps, e=e, dataset=tuning_dataset[ps, e, g], g=g,
-            num_init = 10,
-            Z=Z if run_name != 'sHNMF' else np.zeros((Z.shape[0],Z.shape[1])), rank=rank, W=W, H_G=H_G, H_C=H_C, U_G=U_G, U_C=U_C,
+            g_ps=g_ps, c_ps=c_ps, e=e, dataset=tuning_dataset[g_ps,c_ps, e],
+            num_init = 10, num_markers=num_markers,
+            Z=Z if run_name != 'sHNMF' else np.zeros((Z.shape[0],Z.shape[1])), rank=rank,
             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,lambda_Gloss=1,
             max_outer=50, min_outer=5, tol=1e-6, nonneg=True,
-            sim_output_dir=sim_output_dir, exp_num=exp_map[ps, e, g],
+            sim_output_dir=sim_output_dir, exp_num=exp_map[g_ps,c_ps, e],
             run_name=run_name,G_loss_type='kl_div' if run_name!='SCoNE(Fro)' else 'fro', C_loss_type='kl_div' if run_name!='SCoNE(Fro)' else 'fro',
             artifact_dir=f"{os.path.dirname(artifact_dir)}/logs_tuning"
         )
-        for i, (ps, e, g, lambda_W, lambda_H_G, lambda_H_C, run_name) in enumerate(combos)
+        for i, (g_ps,c_ps, e, lambda_W, lambda_H_G, lambda_H_C, run_name) in enumerate(combos)
     ]
     mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/logs_tuning")
-    for i in range(len(list(product(ps_list, e_list, g_list)))):
+    for i in exp_map.values():
         exp = mlflow.set_experiment(str(i)) # set experiment id ahead of time for slurm parallelism
     jobs = executor.map_array(_call_kwargs, cfgs)
 
@@ -217,65 +234,57 @@ if tuning:
     print(f"[{t1:%Y-%m-%d %H:%M:%S %Z}] now running… elapsed={t1 - t0}", flush=True)
 
 if testing:
-    #testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF']
-    testing_runs = ['RGWAS']
-    if any(x in testing_runs for x in ['SCoNE','SCoNE(Fro)','sHNMF']):
-
+    if any(x in testing_runs for x in tuning_runs):
         # STEP 2: find optimal sparsity parameters for each method
         mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/logs_tuning")
         client = MlflowClient()
         # Get all experiments
-        experiments = client.search_experiments()
         all_runs = []
-        for exp in experiments:
+        for exp in client.search_experiments():
             df = mlflow.search_runs([exp.experiment_id])
             all_runs.append(df)
         all_runs = pd.concat(all_runs, ignore_index=True)
-        all_runs['params.ps'] = all_runs["params.ps"].map({"True": True, "False": False}).astype("boolean")  # columns you want as bools (nullable)
-        all_runs[['params.e','params.g','params.lambda_W','params.lambda_H_G','params.lambda_H_C']]  = all_runs[['params.e','params.g','params.lambda_W','params.lambda_H_G','params.lambda_H_C']].astype("float64") 
-        all_runs['G_plus_C_loss'] = all_runs['metrics.G_loss'] + all_runs['metrics.C_loss']
-        idx = all_runs.groupby(["params.run_name", "params.ps", "params.e", "params.g"])["G_plus_C_loss"].idxmin()
+        all_runs.columns=[i.replace('params.','').replace('metrics.','') for i in all_runs.columns]
+        all_runs[['e','g_ps','c_ps','lambda_W','lambda_H_G','lambda_H_C']]  = all_runs[['e','g_ps','c_ps','lambda_W','lambda_H_G','lambda_H_C']].astype("float64") 
+        idx = all_runs.groupby(['run_name', 'g_ps','c_ps', 'e'])["G_plus_C_loss"].idxmin()
         best = (
             all_runs.loc[idx, all_runs.columns]
-            .sort_values(["params.run_name", "params.ps", "params.e", "params.g"])
             .reset_index(drop=True)
         )
 
     # STEP 3: testing/comparison over 10 other datasets for each experiment
     # submit as a SLURM array (adjust params as needed)
-    # build combos excluding the tuning dataset per (ps,e,g)
+    # build combos excluding the tuning dataset 
     combos = []
-    for ps, e, g in product(ps_list, e_list, g_list):
-        tune_idx = tuning_dataset[ps, e, g]
+    for ((g_ps,c_ps),e) in product(ps_list, e_list):
+        tune_idx = tuning_dataset[g_ps, c_ps, e]
         other_idx = [i for i in dataset_list if i != tune_idx]
         for run_name in testing_runs:
-            if run_name in ['SCoNE','SCoNE(Fro)','sHNMF']:
-                matching_best_run = best[(best['params.run_name']==run_name)&(best['params.ps']==ps)&(best['params.e']==e)&(best['params.g']==g)].copy()
+            if run_name in tuning_runs:
+                matching_best_run = best[(best['run_name']==run_name)&(best['g_ps']==g_ps)&(best['c_ps']==c_ps)&(best['e']==e)].copy()
                 assert matching_best_run.shape[0] == 1
-                lambda_W, lambda_H_G, lambda_H_C = matching_best_run[['params.lambda_W','params.lambda_H_G','params.lambda_H_C']].values[0].tolist()
+                lambda_W, lambda_H_G, lambda_H_C = matching_best_run[['lambda_W','lambda_H_G','lambda_H_C']].values[0].tolist()
             else:
                 lambda_W, lambda_H_G, lambda_H_C = (0,0,0)
             for idx in other_idx: # get 10 random initalizations of each
-                lambda_Gloss=1
-                combos.append((ps, e, g, lambda_W, lambda_H_G, lambda_H_C, run_name, idx, lambda_Gloss))
+                combos.append((g_ps, c_ps, e, lambda_W, lambda_H_G, lambda_H_C, run_name, idx))
     cfgs = [
         dict(
-            ps=ps, e=e, dataset=idx, g=g,
-            num_init = 10,
+            g_ps=g_ps, c_ps=c_ps, e=e, dataset=idx,
+            num_init = 10, num_markers=num_markers,
             Z=Z if run_name not in ['sHNMF','HNMF','G-NMF','C-NMF'] else np.zeros((Z.shape[0],Z.shape[1])), rank=rank,
-            lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C, lambda_Gloss=lambda_Gloss,
+            lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C, lambda_Gloss=1,
             max_outer=50, min_outer=5, tol=1e-6, nonneg=True,
-            sim_output_dir=sim_output_dir, exp_num=exp_map[ps, e, g],
+            sim_output_dir=sim_output_dir, exp_num=exp_map[g_ps, c_ps, e],
             run_name=run_name,G_loss_type='kl_div' if run_name not in ['SCoNE(Fro)','C-NMF','C-CoNE'] else ('fro' if run_name=='SCoNE(Fro)' else None), 
             C_loss_type='kl_div' if run_name not in ['SCoNE(Fro)','G-NMF','G-CoNE'] else ('fro' if run_name=='SCoNE(Fro)' else None),
             artifact_dir=f"{os.path.dirname(artifact_dir)}/logs"
         )
-        for i, (ps, e, g, lambda_W, lambda_H_G, lambda_H_C, run_name, idx, lambda_Gloss) in enumerate(combos)
+        for i, (g_ps, c_ps, e, lambda_W, lambda_H_G, lambda_H_C, run_name, idx) in enumerate(combos)
     ]
     mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/logs")
-    for i in range(len(list(product(ps_list, e_list, g_list)))):
+    for i in exp_map.values():
         exp = mlflow.set_experiment(str(i)) # set experiment id ahead of time for slurm parallelism
     jobs = executor.map_array(_call_kwargs, cfgs)
 
 
-# todo - choose over inits from best loss

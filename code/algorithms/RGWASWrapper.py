@@ -4,9 +4,7 @@ import numpy as np
 import subprocess
 import json
 
-def RGWASWrapper(iid_index_path, r_path, G_path, C_path, Z_path, iid_index, rank=3, num_init=10):
-    np.save(iid_index_path,iid_index.to_numpy())
-
+def RGWASWrapper(iid_index_path, r_path, G_path, C_path, Z_path, rank=3, num_init=10):
     result = subprocess.run(
     f'{r_path} algorithms/RGWAS.R {G_path} {C_path} {iid_index_path} {Z_path} {rank} {num_init}',
     stdout=subprocess.PIPE,

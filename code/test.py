@@ -226,8 +226,10 @@ class TestSCoNE(unittest.TestCase):
 # test cluster eval metrics
 # current test embedded in nmi, that our nmi calculation matches sklearn nmi
 
-# test that all fam files for the same G have iid in same order (Verify map and ped root dir files have same order as fam once make bfile)
+# test that all fam files for the same G have iid in same order (Verify map and ped root dir files have same order as fam once make bfile) and make sure iid == fid 
 
 # test that the sigma for MVBC really does minimize the objective function
 
 # make sure SCoNE chooses init with lowest loss
+
+# make sure only eur samples in eur group

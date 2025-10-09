@@ -3,6 +3,8 @@ import resource
 import time
 import os
 import gc
+from pathlib import Path
+import shutil
 
 # Tensor helper functions
 # define tensor unfolding per Kolda textbook
@@ -71,3 +73,16 @@ def profile_function(func, *args, mem_target='function', **kwargs):
 # Other helper functions
 def sigmoid(x):
   return 1 / (1 + np.exp(-x))
+
+def remove_mlflow_by_runname(run_name,path):
+    root = Path(path)
+    # 1) All subfolders recursively
+    subfolders = [p for p in root.iterdir() if p.is_dir()]
+    for subfolder in subfolders:
+        root = Path(subfolder)
+        subfolders_subfolders = [p for p in root.iterdir() if p.is_dir()]
+        for i in subfolders_subfolders:
+            with open(f'{i}/tags/mlflow.runName','r') as f:
+                run_name_in_file = f.read()
+                if run_name_in_file==run_name:
+                    shutil.rmtree(i)

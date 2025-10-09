@@ -1,6 +1,7 @@
 # python wrapper for MVBC
 import subprocess
 import json
+import numpy as np
 
 
 def MVBCWrapper(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, r_path):
@@ -12,8 +13,9 @@ def MVBCWrapper(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, r_path):
     shell=True, executable='/bin/bash')
     r_output = result.stdout.strip()
     warn_output = result.stderr.strip()
-    assert "converg" not in warn_output, "Issue with convergence"   
+    if "mvbc does not converge" in r_output:
+        return False, "convergence did not improve"
     parsed = json.loads(r_output)
-    factor_matrices = parsed["factor_matrices"]
-    loss_history = parsed["loss_history"]
+    factor_matrices = {k: np.array(v) for k,v in parsed["factor_matrices"].items()}
+    loss_history = {k: [v] for k, v in parsed["loss_history"].items()} 
     return factor_matrices, loss_history
