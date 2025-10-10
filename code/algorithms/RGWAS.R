@@ -13,10 +13,11 @@ num_init <- as.integer(args[6])
 
 # read in matrices, assumes G is in .raw format
 hdr <- fread(G_path, nrows = 0)
-G <- fread(G_path, select = 7:ncol(hdr)) # skip first 6 columns
-G <- as.matrix(G)
-storage.mode(G) <- "integer" 
+sel <- 7:ncol(hdr)
+G   <- fread(G_path, select = sel, colClasses = list(numeric = sel), integer64 = "double")
+G   <- as.matrix(G)
 C <- npyLoad(C_path,"integer")
+storage.mode(C) <- "double"
 
 # read in Z
 Z <- read.table(Z_path, header = FALSE, sep = "", stringsAsFactors = FALSE, check.names = FALSE)

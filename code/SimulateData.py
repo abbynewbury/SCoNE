@@ -40,18 +40,16 @@ from simulations.genomes1000_sim import *
 
 
 # PARAMETERS
-generate_sim = False
-evaluate_sim = True 
-run_gwas = True  # only will run if run_gwas=True AND evaluate_sim=True 
+generate_sim = True
+evaluate_sim = False 
+run_gwas = False  # only will run if run_gwas=True AND evaluate_sim=True 
 # generate all combinations for 5 scenarios
 g = 10 # 10 linked markers
 e_list = [0.25, 0.50, 0.75, 1]
+g_ps_list = [0,0.25,0.75]
+c_ps_list = [0,0.1,0.3]
 dataset_list = range(11) # 11 random datasets for each combination
-combos = []
-for e in e_list:
-    for g_ps,c_ps in [(0,0),(.25,.1),(.25,.3),(.75,.1),(.75,.3)]:
-        for dataset in dataset_list:
-            combos.append((e,g_ps,c_ps,dataset))
+combos = list(product(e_list,g_ps_list,c_ps_list,dataset_list))
 # PARAMETERS
 
 

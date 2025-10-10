@@ -54,7 +54,8 @@ np.random.seed(42)
 # PARAMETERS
 # generate all combinations of e and g_ps, c_ps variables
 e_list = [0.25, 0.50, 0.75, 1] 
-ps_list = [(0,0),(.25,.1),(.25,.3),(.75,.1),(.75,.3)]  #for g_ps, c_ps
+g_ps_list = [0,0.25,0.75]
+c_ps_list = [0,0.1,0.3]
 dataset_list = range(11) # 11 random datasets for each combination 
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
@@ -90,7 +91,7 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
     iid_index = fam_df[fam_df['IID'].isin(simulation_metadata['iid_order'])].index # some samples removed due to overlap btwn subgroups, need correct length
     # read in G with num_markers
     G_path = f'{sim_output_dir}/G_{output_suffix}.raw'
-    G = np.loadtxt(G_path,  usecols=range(6, num_markers+6), dtype=np.int8, skiprows=1)
+    G = np.loadtxt(G_path,  usecols=range(6, num_markers+6), dtype=np.int64, skiprows=1)
     fam_df_subset = pd.read_csv(f'{sim_output_dir}/G_{output_suffix}.fam',sep='\s+',header=None)
     fam_df_subset.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
     assert set(fam_df_subset['IID'].values).issubset(set(fam_df['IID'].values))
@@ -176,7 +177,7 @@ os.makedirs(f"{os.path.dirname(artifact_dir)}/logs_tuning", exist_ok=True)
 # PRELIMINARY: set up fixed params across experiments
 exp_map = {}
 tuning_dataset = {}
-for i, ((g_ps,c_ps),e) in enumerate(product(ps_list, e_list)):
+for i, (g_ps,c_ps,e) in enumerate(product(g_ps_list, c_ps_list, e_list)):
     key = (g_ps,c_ps, e)
     tuning_dataset[key] = np.random.randint(0, 11)
     exp_map[key] = i
@@ -206,8 +207,8 @@ testing_runs = ['MVBC','RGWAS']
 # STEP 1: hparam tuning with 1 randomly selected dataset per experiment (and then remove it from testing)
 if tuning:
     combos = [(g_ps, c_ps, e, lW, lHG, lHC, rn)
-    for ((g_ps,c_ps), e, lW, lHG, lHC, rn) in product(
-        ps_list, e_list, [0,0.3,0.5,1],[0,0.3,0.5,1],[0,0.3,0.5,1], tuning_runs)]
+    for (g_ps,c_ps, e, lW, lHG, lHC, rn) in product(
+        g_ps_list, c_ps_list, e_list, [0,0.3,0.5,1],[0,0.3,0.5,1],[0,0.3,0.5,1], tuning_runs)]
 
     cfgs = [
         dict(
@@ -256,7 +257,7 @@ if testing:
     # submit as a SLURM array (adjust params as needed)
     # build combos excluding the tuning dataset 
     combos = []
-    for ((g_ps,c_ps),e) in product(ps_list, e_list):
+    for (g_ps,c_ps,e) in product(g_ps_list, c_ps_list, e_list):
         tune_idx = tuning_dataset[g_ps, c_ps, e]
         other_idx = [i for i in dataset_list if i != tune_idx]
         for run_name in testing_runs:

@@ -13,14 +13,14 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
 
   # --- Read G ---
   hdr <- fread(G_path, nrows = 0)
-  G   <- fread(G_path, select = 7:ncol(hdr))
+  sel <- 7:ncol(hdr)
+  G   <- fread(G_path, select = sel, colClasses = list(numeric = sel), integer64 = "double")
   G   <- as.matrix(G)
-  storage.mode(G) <- "integer"
 
   # --- Read C (.npy) ---
   C <- npyLoad(C_path,"integer")
-  storage.mode(C) <- "integer"
-
+  storage.mode(C) <- "double"
+  
   # --- Run MVBC ---
   remaining <- seq_len(nrow(G)) # indices of individuals still under consideration
   W <- matrix(0, nrow = dim(G)[1], ncol = rank)

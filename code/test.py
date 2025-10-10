@@ -36,8 +36,7 @@ def file_hash(path):
 class TestSimulatedData(unittest.TestCase):
     def setUp(self):
         # read in 
-        G = np.loadtxt(f'{sim_output_dir}/G.raw',  usecols=range(6, 10000+6), dtype=np.int8, skiprows=1)
-        self.G = (G>0).astype(np.int8)
+        G = np.loadtxt(f'{sim_output_dir}/G.raw',  usecols=range(6, 10000+6), dtype=np.int64, skiprows=1)
         # assert that bim_df and G order is the same
         bfile_path = f'{sim_output_dir}/G'
         self.bim_df = pd.read_csv(f'{bfile_path}.bim',sep='\s+',header=None,names=['CHR','SNP','CM','POS','A1','A2']).reset_index(drop=True)
