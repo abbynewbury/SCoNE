@@ -104,7 +104,7 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
     output_file_suffix: such that if multiple simulations are created, each is distinctly defined - suffix for C and simulated data pkl file
     output_dir: where to write output genetic data matrix (X) in form of plink bfile, and clinical data matrix C
     M: number of clinical features (right now assuming all from one domain & all binary)
-    g_ps: variable controlling how much population stratification is affecting genotype (value will determine quartile of AF variance {0.25,0.5,0.75}), or if 0 will pull from EUR superpopulation)
+    g_ps: variable controlling how much population stratification is affecting genotype (value will determine quartile of AF variance (right now accepts 0.25 or 0.75)), or if 0 will pull from EUR superpopulation)
     c_ps: variable controlling the shift due to population stratification on phenotypic subgroup and clinical data matrix (value will determine range of uniform distribution shift Uniform(-a,a))
     (0-> pick SNPs in bottom 10% by allele frequency variance i.e. little pop. strat., 0.9-> pick SNPS in top 10% by allele frequency variance i.e. large pop. strat.)
     g: number of markers linked with subtype classification (if rij>int(0.4*markers_assoc) then subject i in subgroup j)
@@ -137,15 +137,19 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
 
     markers_assoc_dict = {} # names of the markers that are associated with each subgroup
     if g_ps !=0:
+        assert g_ps in [0.25,0.75], f"right now code only takes top or bottom 25th percentile, value {g_ps} not accepted"
         # calculate weighted af variance
         w = igsr_samples['Superpopulation code'].value_counts().to_numpy(float)
         w_code_index = igsr_samples['Superpopulation code'].value_counts().index
         X = maf_by_superpop[w_code_index].to_numpy(float)  
         
         w = w / w.sum()
-        mu = X @ w                                           # (N,)
+        mu = X @ w                                        
         maf_by_superpop['af_variance_weighted'] = ((X - mu[:, None])**2 * w[None, :]).sum(axis=1)
-        maf_by_superpop['af_var_quartile'] = (pd.qcut(maf_by_superpop['af_variance_weighted'], 4, labels=[0.00, 0.25, 0.50, 0.75]))
+        q1 = maf_by_superpop['af_variance_weighted'].quantile(0.25)
+        q3 = maf_by_superpop['af_variance_weighted'].quantile(0.75)
+        # Mark bottom/top quartiles; leave middle as NaN 
+        maf_by_superpop["af_var_quartile"] = np.select([maf_by_superpop['af_variance_weighted'] <= q1, maf_by_superpop['af_variance_weighted'] >= q3],[0.25, 0.75],default=np.nan)
         keep_samples = '' # keep all samples
         # select markers
         for genetic_subgroup in range(2):
@@ -300,13 +304,13 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
         # map subject IDs to row indices 
         row_idx = [i for i, iid in enumerate(iid_order) if iid in subj_ids]
         b = subj_bump[row_idx][:, None] # per subject bump from population structure
-        C[np.ix_(row_idx, assoc_idx[:n1])] = streams["poisson"].poisson(clip01(0.6+b), size=(len(row_idx), n1))
-        C[np.ix_(row_idx, assoc_idx[n1:n2])] = streams["poisson"].poisson(clip01(0.5+b), size=(len(row_idx), n2-n1))
-        C[np.ix_(row_idx, assoc_idx[n2:])] = streams["poisson"].poisson(clip01(0.4+b), size=(len(row_idx), len(assoc_idx)-n2))
+        C[np.ix_(row_idx, assoc_idx[:n1])] = streams["poisson"].poisson(clip01(0.4+b), size=(len(row_idx), n1))
+        C[np.ix_(row_idx, assoc_idx[n1:n2])] = streams["poisson"].poisson(clip01(0.3+b), size=(len(row_idx), n2-n1))
+        C[np.ix_(row_idx, assoc_idx[n2:])] = streams["poisson"].poisson(clip01(0.2+b), size=(len(row_idx), len(assoc_idx)-n2))
         clinical_assoc_df_rows += [
-        {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.6, "indices": assoc_idx[:n1]},
-        {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.5, "indices": assoc_idx[n1:n2]},
-        {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.4, "indices": assoc_idx[n2:]},
+        {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.4, "indices": assoc_idx[:n1]},
+        {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.3, "indices": assoc_idx[n1:n2]},
+        {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.2, "indices": assoc_idx[n2:]},
         ]
     clinical_assoc_df = pd.DataFrame(clinical_assoc_df_rows)
 
@@ -441,6 +445,7 @@ def run_plink_gwas(bfile, covariate_file, phenotype_file, out):
 
 # saige gwas
 def split_plink_bfile(bfile,out_path):
+    chrs_absent = []
     for chr in range(1,23):
         result = subprocess.run(f'''module load plink/1.9 && plink --bfile {bfile} \
           --chr {chr} \
@@ -454,12 +459,13 @@ def split_plink_bfile(bfile,out_path):
             ])
             if no_var:
                 print(f"chr {chr}: no variants; skipping")
+                chrs_absent.append(chr)
                 [os.remove(f) for f in glob.glob(f"{out_path}_{chr}*")]
                 continue
             # otherwise, surface the error
             sys.stderr.write(result.stderr)
             raise subprocess.CalledProcessError(result.returncode, "plink split bfile", output=result.stdout, stderr=result.stderr)
-
+    return [i for i in range(1,23) if i not in chrs_absent]
 # step 1: run null GRM for each phenotype
 def run_step1(plinkFile, phenoFile, out):
     saige_phenoFile = pd.read_csv(phenoFile,sep='\t')
@@ -489,15 +495,10 @@ def active_count(job_ids):
     # count non-empty lines
     return sum(1 for line in r.stdout.splitlines() if line.strip())
 
-def submit_step2_job(bfile, GMMATmodelFile, varianceRatioFile, intermediate_saige_dir, out):
+def submit_step2_job(chrs_present, bfile, GMMATmodelFile, varianceRatioFile, intermediate_saige_dir, out):
     # run association tests LOCO
-    chrs = sorted({
-        int(m.group(1))
-        for p in Path(bfile).parent.glob(Path(bfile).name + "_*")
-        if (m := re.match(rf"{re.escape(Path(bfile).name)}_(\d+)", p.name))
-    }) # only run on chrs where there is a snp for assoc. testing
     job_ids = []
-    for chr in chrs:
+    for chr in chrs_present:
         while active_count(job_ids) >= 5:
             time.sleep(30)
         job_name = f"{os.path.basename(out)}_chr_{chr}"
@@ -540,7 +541,7 @@ Rscript $(echo $CMAKE_PREFIX_PATH | tr ':' '\n' | grep R/4.3.3)/SAIGE/extdata/st
 
     # consolidate saige results
     saige_results = []
-    for chr in chrs:
+    for chr in chrs_present:
         saige_chr_results = pd.read_csv(f'{out}_chr_{chr}',sep='\t')
         saige_results.append(saige_chr_results)
     saige_results = pd.concat(saige_results)
@@ -559,14 +560,14 @@ def run_saige(plinkFile,phenoFile,intermediate_saige_dir,output_dir,phenotypic_s
     run_step1(plinkFile=plinkFile, phenoFile=phenoFile,
               out=f'{intermediate_saige_dir}/{out_suffix}')
     
-    # split plink bfile by chr (for SAIGE LOCO)
-    split_plink_bfile(f'{output_dir}/G_{output_file_suffix}',f'{intermediate_saige_dir}/G_{output_file_suffix}')
+    # split plink bfile by chr (for SAIGE LOCO) and record which chrs are present
+    chrs_present = split_plink_bfile(f'{output_dir}/G_{output_file_suffix}',f'{intermediate_saige_dir}/G_{output_file_suffix}')
 
     # run association tests LOCO
     GMMATmodelFile = f'{intermediate_saige_dir}/{out_suffix}.rda'
     varianceRatioFile = f'{intermediate_saige_dir}/{out_suffix}.varianceRatio.txt'
     # runs for each chr then consolidates into out file
-    submit_step2_job(bfile=f'{intermediate_saige_dir}/G_{output_file_suffix}', GMMATmodelFile=GMMATmodelFile, varianceRatioFile=varianceRatioFile,
+    submit_step2_job(chrs_present=chrs_present, bfile=f'{intermediate_saige_dir}/G_{output_file_suffix}', GMMATmodelFile=GMMATmodelFile, varianceRatioFile=varianceRatioFile,
                     intermediate_saige_dir=intermediate_saige_dir, 
                       out=f'{output_dir}/GWAS_RESULTS/{out_suffix}')
 
