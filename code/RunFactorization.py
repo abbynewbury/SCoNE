@@ -56,7 +56,7 @@ np.random.seed(42)
 e_list = [0.25, 0.50, 0.75, 1] 
 g_ps_list = [0,0.25,0.75]
 c_ps_list = [0,0.1,0.3]
-dataset_list = range(11) # 11 random datasets for each combination 
+dataset_list = range(2) # 11 random datasets for each combination - TODO: change back
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
 rank = 3
@@ -198,10 +198,8 @@ executor.update_parameters(
         "mail-user": "anewbury@nygenome.org",
     },
 )
-# tuning_runs = ['SCoNE','SCoNE(Fro)','sHNMF','MVBC']  # all of these runs have sparsity parameters that need to be tuned # TODO: put back
-# testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','RGWAS','MVBC']
-tuning_runs = ['MVBC']
-testing_runs = ['MVBC','RGWAS']
+tuning_runs = ['SCoNE','SCoNE(Fro)','sHNMF','MVBC']  # all of these runs have sparsity parameters that need to be tuned # TODO: put back
+testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','RGWAS','MVBC']
 # PRELIMINARY: set up fixed params across experiments
 
 # STEP 1: hparam tuning with 1 randomly selected dataset per experiment (and then remove it from testing)

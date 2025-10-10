@@ -20,20 +20,25 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
   # --- Read C (.npy) ---
   C <- npyLoad(C_path,"integer")
   storage.mode(C) <- "double"
-  
+
   # --- Run MVBC ---
   remaining <- seq_len(nrow(G)) # indices of individuals still under consideration
   W <- matrix(0, nrow = dim(G)[1], ncol = rank)
   total_loss <- list()
   G_plus_C_loss <- list()
   for (i in seq_len(rank)){
+    if(i==rank){ # in this case last rank gets all remaining individuals
+        cl_full <- rep(0, nrow(G)) 
+        cl_full[remaining] <- 1
+        W[, i] <- cl_full
+        break}
     G_i <- G[remaining, , drop = FALSE]
     C_i <- C[remaining, , drop = FALSE]
     datasets <- list(G_i, C_i)
     result <- mvsvdl1(datasets, lvs, lz)
     # store W
     cl <- as.vector(result$Cluster)
-    cl_full <- numeric(dim(G)[1]) # fill with 0s by default
+    cl_full <- rep(0, nrow(G))  # fill with 0s by default
     cl_full[remaining] <- cl  
     W[, i] <- cl_full
 
