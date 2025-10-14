@@ -4,7 +4,6 @@ library(jsonlite)
 library(data.table)
 
 l0 <- function(x) sum(abs(x) > 0)
-tr <- function(M) sum(diag(M))
 
 
 run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, maxOuter) {
@@ -27,7 +26,7 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
   total_loss <- list()
   G_plus_C_loss <- list()
   for (i in seq_len(rank)){
-    if(i==rank){ # in this case last rank gets all remaining individuals
+    if(i==rank || length(remaining)==1){ # in this case last rank gets all remaining individuals
         cl_full <- rep(0, nrow(G)) 
         cl_full[remaining] <- 1
         W[, i] <- cl_full
