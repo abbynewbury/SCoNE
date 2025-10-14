@@ -63,7 +63,7 @@ if generate_sim:
     maf_by_superpop = calculate_maf_by_superpop(igsr_samples_filepath,intermediate_plink_dir,bfile_path=f'{output_dir}/G',output=maf_by_superpop_filepath)
     # RUN FILE SETUP
     
-    child_ss = np.random.SeedSequence().spawn(len(combos)) 
+    child_ss = np.random.SeedSequence().spawn(len(combos)) # TODO HERE (make dict with key)
     run_seeds = [int(np.random.default_rng(ss).integers(1, 2**31 - 1)) for ss in child_ss] # for reproducible randomness
     # 11 random datasets each
     run_one = partial(

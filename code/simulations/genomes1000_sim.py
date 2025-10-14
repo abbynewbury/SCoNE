@@ -126,8 +126,9 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
     '''
     assert num_clinical_assoc<M, "num_clinical_assoc cannot exceed M"
     parent_ss = np.random.SeedSequence(run_seed)
-    names = ["markers", "env_noise", "ps_noise", "extra_sub", "assoc", "poisson"]
+    names = ["env_noise", "ps_noise", "extra_sub", "assoc", "poisson"]
     streams = {name: np.random.default_rng(ss) for name, ss in zip(names, parent_ss.spawn(len(names)))}
+    streams["markers"] =  np.random.default_rng(np.random.SeedSequence(0)) # fix markers within a marker subset defined by g_ps
 
     # 1. Read in allele frequencies per 5 superpopulations to estimate af variance across groups OR pull from superpopulation EUR only
     maf_by_superpop = pd.read_csv(maf_by_superpop_filepath,sep='\s+')
@@ -232,7 +233,7 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
         phenotypic_subgroup_df = phenotypic_subgroup_df.merge(igsr_samples[['IID','Superpopulation code']],on='IID',how='inner')
         # corresponding genetic subgroup value for r
         phenotypic_subgroup_df['superpop_shift'] = phenotypic_subgroup_df['Superpopulation code'].map({sp: streams["ps_noise"].uniform(-c_ps, c_ps) for sp in phenotypic_subgroup_df['Superpopulation code'].unique()})
-        phenotypic_subgroup_df['subgroup'] = (1/5)*phenotypic_subgroup_df['r']*e + streams["env_noise"].normal(loc=0,scale=1,size=phenotypic_subgroup_df.shape[0]) + phenotypic_subgroup_df["superpop_shift"]> (1/5)*phenotypic_subgroup_df['r'].quantile(0.8)*e
+        phenotypic_subgroup_df['subgroup'] = (1/2)*phenotypic_subgroup_df['r']*e + streams["env_noise"].normal(loc=0,scale=1,size=phenotypic_subgroup_df.shape[0]) + phenotypic_subgroup_df["superpop_shift"]> (1/2)*phenotypic_subgroup_df['r'].quantile(0.8)*e
         gi_phenotypic_subgroups.append(phenotypic_subgroup_df)
     gi_phenotypic_subgroups = pd.concat(gi_phenotypic_subgroups)
     # remove overlapping samples in phenotypic subgroups 0 and 1

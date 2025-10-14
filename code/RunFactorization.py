@@ -54,8 +54,8 @@ np.random.seed(42)
 # PARAMETERS
 # generate all combinations of e and g_ps, c_ps variables
 e_list = [0.25, 0.50, 0.75, 1] 
-g_ps_list = [0,0.25,0.75]
-c_ps_list = [0,0.1,0.3]
+g_ps_list = [0] # TODO: change back to  [0,0.25,0.75]
+c_ps_list = [0] # TODO: change back to [0,0.1,0.3]
 dataset_list = range(11) # 11 random datasets for each combination
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
@@ -206,7 +206,7 @@ testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(F
 if tuning:
     combos = [(g_ps, c_ps, e, lW, lHG, lHC, rn)
     for (g_ps,c_ps, e, lW, lHG, lHC, rn) in product(
-        g_ps_list, c_ps_list, e_list, [0,0.3,0.5,1],[0,0.3,0.5,1],[0,0.3,0.5,1], tuning_runs)]
+        g_ps_list, c_ps_list, e_list, [0,0.5,1],[0,0.5,1],[0,0.5,1], tuning_runs)]
 
     cfgs = [
         dict(

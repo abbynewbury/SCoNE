@@ -218,6 +218,9 @@ class TestSCoNE(unittest.TestCase):
         assert not all(col_factors)
 
 
+# more sim data tests
+# markers assoc is same for all within same g_ps
+
 # test mlflow setup:
 # g = df.groupby("experiment_id")[["params.ps", "params.e", "params.num_markers_assoc"]].nunique()
 # assert g[g.ne(1).any(axis=1)].shape[0] == 0 # assert that for every unique experiment id, only one ps, e, num_markers_assoc value
