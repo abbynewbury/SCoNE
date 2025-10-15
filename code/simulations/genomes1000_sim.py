@@ -299,8 +299,8 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
     for phenotypic_subgroup in range(4):
         # index of randomly chosen, associated clinical variables 
         assoc_idx = streams["assoc"].choice(M, size=num_clinical_assoc, replace=False)  
-        n1 = num_clinical_assoc // 3 # 1/3 who get P 0.6
-        n2 = 2 * num_clinical_assoc // 3 # 1/3 who get P 0.5
+        n1 = num_clinical_assoc // 3 # 1/3 
+        n2 = 2 * num_clinical_assoc // 3 # 1/3 
         # get those who are in the subgroup
         mask = ((phenotypic_subgroups["phenotypic_subgroup"] == phenotypic_subgroup) & (phenotypic_subgroups["subgroup"]))
         subj_ids = phenotypic_subgroups.loc[mask, "IID"].unique()
