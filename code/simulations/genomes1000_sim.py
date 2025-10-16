@@ -147,20 +147,24 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
         w = w / w.sum()
         mu = X @ w                                        
         maf_by_superpop['af_variance_weighted'] = ((X - mu[:, None])**2 * w[None, :]).sum(axis=1)
+        fifth_percentile = q1 = maf_by_superpop['af_variance_weighted'].quantile(0.05) 
         q1 = maf_by_superpop['af_variance_weighted'].quantile(0.25)
         q3 = maf_by_superpop['af_variance_weighted'].quantile(0.75)
         # Mark bottom/top quartiles; leave middle as NaN 
         maf_by_superpop["af_var_quartile"] = np.select([maf_by_superpop['af_variance_weighted'] <= q1, maf_by_superpop['af_variance_weighted'] >= q3],[0.25, 0.75],default=np.nan)
+        maf_by_superpop["null_pool"] = maf_by_superpop['af_variance_weighted'] <= fifth_percentile
         keep_samples = '' # keep all samples
+
+        # select marker pool (num_markers markers where half are in right af_var_quartile and half are from null pool)
+        marker_pool = maf_by_superpop[maf_by_superpop["null_pool"]].sample(n=num_markers//2, replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist()
+        marker_pool.extend(maf_by_superpop[(maf_by_superpop['af_var_quartile']==g_ps)&(~maf_by_superpop['SNP'].isin(marker_pool))] 
+                        .sample(n=num_markers//2, replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist()) # & half from correct pool 
+
         # select markers
         for genetic_subgroup in range(2):
-            assert g_ps in [0.25,0.5,0.75], f"g_ps {g_ps} value not in {0.25,0.5,0.75}, right now code only taking these quartiles"
-            markers_assoc = maf_by_superpop[maf_by_superpop['af_var_quartile']==g_ps].sample(n=g, replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist()
+            markers_assoc = streams["markers"].choice(marker_pool,size=g, replace=False).tolist()
             markers_assoc_dict[genetic_subgroup] = markers_assoc
-        # select num_markers-markers assoc extra markers for analysis (G)
-        all_markers_assoc = set(sum(markers_assoc_dict.values(), []))
-        extra_markers = (maf_by_superpop[(maf_by_superpop['af_var_quartile']==g_ps)&(~maf_by_superpop['SNP'].isin(all_markers_assoc))]
-                        .sample(n=num_markers-len(all_markers_assoc), replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist())
+
     else:
         eur_samples = igsr_samples[igsr_samples['Superpopulation code']=='EUR']['IID'].values.tolist()
         # keep for european samples
@@ -169,14 +173,13 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
                 f.write(iid + "\t" + iid + "\n")
         keep_samples = f'--keep {intermediate_file_dir}/eursamples_{intermediate_file_suffix}.txt'
 
+        # select marker pool (where EUR MAF>5%)
+        marker_pool = maf_by_superpop[maf_by_superpop['EUR']>=0.05].sample(n=num_markers, replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist() 
+
         # select markers
         for genetic_subgroup in range(2):
-            markers_assoc = maf_by_superpop[maf_by_superpop['EUR']>=0.05].sample(n=g, replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist() # at least 5% AF in EUR population
+            markers_assoc = streams["markers"].choice(marker_pool,size=g, replace=False).tolist()
             markers_assoc_dict[genetic_subgroup] = markers_assoc
-        # select num_markers-markers assoc extra markers for analysis (G)
-        all_markers_assoc = set(sum(markers_assoc_dict.values(), []))
-        extra_markers = (maf_by_superpop[(maf_by_superpop['EUR']>=0.05)&(~maf_by_superpop['SNP'].isin(all_markers_assoc))]
-                .sample(n=num_markers-len(all_markers_assoc), replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist())
     
     # 2. Generate genetic subgroups
     genetic_subgroups = []
@@ -261,11 +264,9 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
     phenotypic_subgroups = pd.concat([gi_phenotypic_subgroups,non_gi_phenotypic_subgroups])
 
     # extract all markers & correct individuals for final G
-    assert len(all_markers_assoc) + len(extra_markers) == num_markers
+    assert len(set(marker_pool)) == num_markers
     with open(f'{intermediate_file_dir}/allmarkers_{intermediate_file_suffix}.txt','w') as f:
-        for snp in extra_markers:
-            f.write(snp + "\n")
-        for snp in all_markers_assoc:
+        for snp in marker_pool:
             f.write(snp + "\n")
     with open(f'{intermediate_file_dir}/iids_{intermediate_file_suffix}.txt','w') as f:
         for iid in iid_order:
@@ -307,13 +308,13 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
         # map subject IDs to row indices 
         row_idx = [i for i, iid in enumerate(iid_order) if iid in subj_ids]
         b = subj_bump[row_idx][:, None] # per subject bump from population structure
-        C[np.ix_(row_idx, assoc_idx[:n1])] = streams["poisson"].poisson(clip01(0.4+b), size=(len(row_idx), n1))
-        C[np.ix_(row_idx, assoc_idx[n1:n2])] = streams["poisson"].poisson(clip01(0.3+b), size=(len(row_idx), n2-n1))
-        C[np.ix_(row_idx, assoc_idx[n2:])] = streams["poisson"].poisson(clip01(0.2+b), size=(len(row_idx), len(assoc_idx)-n2))
+        C[np.ix_(row_idx, assoc_idx[:n1])] = streams["poisson"].poisson(clip01(0.6+b), size=(len(row_idx), n1))
+        C[np.ix_(row_idx, assoc_idx[n1:n2])] = streams["poisson"].poisson(clip01(0.5+b), size=(len(row_idx), n2-n1))
+        C[np.ix_(row_idx, assoc_idx[n2:])] = streams["poisson"].poisson(clip01(0.4+b), size=(len(row_idx), len(assoc_idx)-n2))
         clinical_assoc_df_rows += [
-        {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.4, "indices": assoc_idx[:n1]},
-        {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.3, "indices": assoc_idx[n1:n2]},
-        {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.2, "indices": assoc_idx[n2:]},
+        {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.6, "indices": assoc_idx[:n1]},
+        {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.5, "indices": assoc_idx[n1:n2]},
+        {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.4, "indices": assoc_idx[n2:]},
         ]
     clinical_assoc_df = pd.DataFrame(clinical_assoc_df_rows)
 

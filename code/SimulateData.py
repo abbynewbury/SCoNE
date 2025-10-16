@@ -49,7 +49,7 @@ e_list = [0.25, 0.50, 0.75, 1]
 g_ps_list = [0,0.25,0.75]
 c_ps_list = [0,0.1,0.3]
 dataset_list = range(11) # 11 random datasets for each combination
-combos = list(product(e_list,g_ps_list,c_ps_list,dataset_list))
+combos = [(e, g_ps, c_ps, d) for e, g_ps in product(e_list, g_ps_list) for c_ps in ([0] if g_ps == 0 else c_ps_list) for d in dataset_list]
 # PARAMETERS
 
 

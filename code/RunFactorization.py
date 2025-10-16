@@ -54,14 +54,14 @@ np.random.seed(42)
 # PARAMETERS
 # generate all combinations of e and g_ps, c_ps variables
 e_list = [0.25, 0.50, 0.75, 1] 
-g_ps_list = [0,0.25,0.75]
-c_ps_list = [0,0.1,0.3] 
+g_ps_list = [0.75] # TODO: change back to [0,0.25,0.75]
+c_ps_list = [0.3] # TODO: change back to [0,0.1,0.3]
 dataset_list = range(11) # 11 random datasets for each combination
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
 rank = 3
 num_markers = 100
-tuning = True # to run sparsity tuning step
+tuning = False # to run sparsity tuning step
 testing = True # to run testing step
 # PARAMETERS
 
@@ -177,7 +177,7 @@ os.makedirs(f"{os.path.dirname(artifact_dir)}/logs_tuning", exist_ok=True)
 # PRELIMINARY: set up fixed params across experiments
 exp_map = {}
 tuning_dataset = {}
-for i, (g_ps,c_ps,e) in enumerate(product(g_ps_list, c_ps_list, e_list)):
+for i, (g_ps,c_ps,e) in enumerate([(g_ps, c_ps, e) for e, g_ps in product(e_list, g_ps_list) for c_ps in ([0] if g_ps == 0 else c_ps_list)]):
     key = (g_ps,c_ps, e)
     tuning_dataset[key] = np.random.randint(0, 11)
     exp_map[key] = i
@@ -199,14 +199,14 @@ executor.update_parameters(
     },
 )
 tuning_runs = ['SCoNE','SCoNE(Fro)','sHNMF','MVBC']  # all of these runs have sparsity parameters that need to be tuned 
-testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','RGWAS','MVBC']
+# testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','RGWAS','MVBC'] # TODO CHANGE BACK
+testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE']
 # PRELIMINARY: set up fixed params across experiments
 
 # STEP 1: hparam tuning with 1 randomly selected dataset per experiment (and then remove it from testing)
 if tuning:
-    combos = [(g_ps, c_ps, e, lW, lHG, lHC, rn)
-    for (g_ps,c_ps, e, lW, lHG, lHC, rn) in product(
-        g_ps_list, c_ps_list, e_list, [0,0.5,1],[0,0.5,1],[0,0.5,1], tuning_runs)]
+    combos = [(g_ps, c_ps, e, lW, lHG, lHC, rn) for e, g_ps in product(e_list, g_ps_list) for c_ps in ([0] if g_ps == 0 else c_ps_list) for (lW, lHG, lHC, rn) in product([0,0.5,1],[0,0.5,1],[0,0.5,1], tuning_runs)]
+
 
     cfgs = [
         dict(
@@ -255,18 +255,19 @@ if testing:
     # submit as a SLURM array (adjust params as needed)
     # build combos excluding the tuning dataset 
     combos = []
-    for (g_ps,c_ps,e) in product(g_ps_list, c_ps_list, e_list):
-        tune_idx = tuning_dataset[g_ps, c_ps, e]
-        other_idx = [i for i in dataset_list if i != tune_idx]
-        for run_name in testing_runs:
-            if run_name in tuning_runs:
-                matching_best_run = best[(best['run_name']==run_name)&(best['g_ps']==g_ps)&(best['c_ps']==c_ps)&(best['e']==e)].copy()
-                assert matching_best_run.shape[0] == 1
-                lambda_W, lambda_H_G, lambda_H_C = matching_best_run[['lambda_W','lambda_H_G','lambda_H_C']].values[0].tolist()
-            else:
-                lambda_W, lambda_H_G, lambda_H_C = (0,0,0)
-            for idx in other_idx: # get 10 random initalizations of each
-                combos.append((g_ps, c_ps, e, lambda_W, lambda_H_G, lambda_H_C, run_name, idx))
+    for (g_ps,e) in product(g_ps_list, e_list):
+        for c_ps in ([0] if g_ps == 0 else c_ps_list):
+            tune_idx = tuning_dataset[g_ps, c_ps, e]
+            other_idx = [i for i in dataset_list if i != tune_idx]
+            for run_name in testing_runs:
+                if run_name in tuning_runs:
+                    matching_best_run = best[(best['run_name']==run_name)&(best['g_ps']==g_ps)&(best['c_ps']==c_ps)&(best['e']==e)].copy()
+                    assert matching_best_run.shape[0] == 1
+                    lambda_W, lambda_H_G, lambda_H_C = matching_best_run[['lambda_W','lambda_H_G','lambda_H_C']].values[0].tolist()
+                else:
+                    lambda_W, lambda_H_G, lambda_H_C = (0,0,0)
+                for idx in other_idx: # get 10 random initalizations of each
+                    combos.append((g_ps, c_ps, e, lambda_W, lambda_H_G, lambda_H_C, run_name, idx))
     cfgs = [
         dict(
             g_ps=g_ps, c_ps=c_ps, e=e, dataset=idx,
@@ -277,11 +278,11 @@ if testing:
             sim_output_dir=sim_output_dir, exp_num=exp_map[g_ps, c_ps, e],
             run_name=run_name,G_loss_type='kl_div' if run_name not in ['SCoNE(Fro)','C-NMF','C-CoNE'] else ('fro' if run_name=='SCoNE(Fro)' else None), 
             C_loss_type='kl_div' if run_name not in ['SCoNE(Fro)','G-NMF','G-CoNE'] else ('fro' if run_name=='SCoNE(Fro)' else None),
-            artifact_dir=f"{os.path.dirname(artifact_dir)}/logs"
+            artifact_dir=f"{os.path.dirname(artifact_dir)}/new_logs" # TODO: change back
         )
         for i, (g_ps, c_ps, e, lambda_W, lambda_H_G, lambda_H_C, run_name, idx) in enumerate(combos)
     ]
-    mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/logs")
+    mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/new_logs") # TODO: change back
     for i in exp_map.values():
         exp = mlflow.set_experiment(str(i)) # set experiment id ahead of time for slurm parallelism
     jobs = executor.map_array(_call_kwargs, cfgs)
