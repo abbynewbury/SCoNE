@@ -55,7 +55,7 @@ np.random.seed(42)
 # generate all combinations of e and g_ps, c_ps variables
 e_list = [0.25, 0.50, 0.75, 1] 
 g_ps_list = [0,0.25,0.75]
-c_ps_list = [0,0.3,0.5,1]
+c_ps_list = [0,0.1,0.2,0.3,0.4,0.5,1]
 dataset_list = range(11) # 11 random datasets for each combination
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
@@ -67,7 +67,7 @@ testing = True # to run testing step
 
 # read in Z
 Z_df = pd.read_csv(f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.Q',sep='\s+',header=None)
-Z = Z_df[[i for i in Z_df.columns if i!='IID']].to_numpy() 
+Z = Z_df[range(5)].to_numpy() 
 
 
 
