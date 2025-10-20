@@ -55,7 +55,7 @@ np.random.seed(42)
 # generate all combinations of e and g_ps, c_ps variables
 e_list = [0.25, 0.50, 0.75, 1] 
 g_ps_list = [0,0.25,0.75]
-c_ps_list = [1]
+c_ps_list = [0,0.3,0.5,1]
 dataset_list = range(11) # 11 random datasets for each combination
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
