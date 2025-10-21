@@ -180,18 +180,80 @@ def make_fg_UC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lamb
         return f, GU_C.flatten(order='F')
     return fun
 
+def proj_box(x, lb=None, ub=None):
+    """Project x onto [lb, ub] elementwise (use lb/ub=None for no bound)."""
+    if lb is not None: x = np.maximum(x, lb)
+    if ub is not None: x = np.minimum(x, ub)
+    return x
+
+def armijo_suff_decrease_cond(f_new,f,g,x_new,x,sigma):
+    return f_new - f <= sigma*np.dot(g.ravel(),(x_new-x).ravel())
+
+def pgd_armijo(fun, x0, lb=0, ub=None, max_iter=500, rho=0.1, sigma=0.01, ftol=1e-6):
+    """
+    Projected gradient descent with Armijo rule.
+
+    fun(x): includes scalar objective and gradient (like jac=True in sklearn)
+    lb, ub: arrays/scalars for box bounds (e.g., lb=0 for nonnegativity)
+    sigma (Armijo constant in (0,1)); rho (shrink factor in (0,1))
+    """
+    x = proj_box(x0, lb, ub)
+    n=1
+    # Armijo backtracking
+    for it in range(max_iter):
+        f,g = fun(x)
+
+        # helper: projected point for a given step n
+        def x_of(n):
+            return proj_box(x - n * g, lb, ub)
+        
+        x_new = x_of(n)
+        f_new,_ = fun(x_new)
+
+        if armijo_suff_decrease_cond(f_new,f,g,x_new,x,sigma):
+            # grow n: n <- n / rho until Armijo fails or projection makes no change
+            while True:
+                n_next = n / rho
+                x_next = x_of(n_next)
+                if np.allclose(x_next, x_new, atol=0, rtol=0):
+                    break
+                f_next,_ = fun(x_next)
+                if not armijo_suff_decrease_cond(f_next, f, g, x_next, x, sigma):
+                    break
+                n, x_new, f_new = n_next, x_next, f_next
+        else:
+            while True:
+                n_next= n * rho
+                x_next = x_of(n_next)
+                f_next,_ = fun(x_next)
+                if armijo_suff_decrease_cond(f_next, f, g, x_next, x, sigma):
+                    n, x_new, f_new = n_next, x_next, f_next
+                    break
+                n, x_new, f_new = n_next, x_next, f_next
+        
+        # implement early stopping (with gtol and ftol)
+        if abs(f_new - f) < ftol:
+            x = x_new
+            return x
+
+        x = x_new
+
+    return x
 
 def alternating_opt(
     G,C,Z,              # true matrices
     rank, num_init, # init: number of initializations (will choose one with best loss as final result)
     lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss,                  # regularization parameters
-    method,                 # method and options for scipy minimize
-    options,
     G_loss_type, C_loss_type, # in 'kl_div', 'bce', 'fro' or None (None indicates not fitting to data, i.e. if G_loss_type=None & C_loss_type='fro then C only optimization)
+    max_inner=50, # options for pgd_armijo
+    rho=0.1, # options for pgd_armijo (n shrink factor)
+    sigma=0.01, # options for pgd_armijo (Armijo constant)
+    inner_tol=1e-3, # options for pgd_armijo (stopping criteria for ftol)
     max_outer=30,
     min_outer=5,
     tol=1e-4,
-    nonneg=True             # set per-block L-BFGS-B bounds to [0, +inf)
+    lb=0,
+    ub=None    
 ):
     '''
     To remove sparsity (CoNE) - set all lambda = 0
@@ -200,9 +262,8 @@ def alternating_opt(
     To run C only (CNMF)
     To run with all Frobenius norm (SCoNE (Fro))
     '''
-    def one_block_update(name, X, method, options):
+    def one_block_update(name, X):
         x0 = X.flatten(order='F') 
-        bnds = [(0, None)] * x0.size if nonneg else None
 
         if name == "W":
             fun = make_fg_W(W.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
@@ -216,8 +277,9 @@ def alternating_opt(
             fun = make_fg_UC(U_C.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
         else:
             raise ValueError(f"Unknown block {name}")
-        res = minimize(fun, x0, method=method, jac=True, bounds=bnds, options=options)
-        return res.x.reshape(X.shape, order='F')
+        x = pgd_armijo(fun, x0, lb=lb, ub=ub, max_iter=max_inner, rho=rho, sigma=sigma, ftol=inner_tol)
+        #res = minimize(fun, x0, method=method, jac=True, bounds=bnds, options=options)
+        return x.reshape(X.shape, order='F')
 
     best_total_loss = np.inf
     for run in range(num_init):
@@ -233,13 +295,13 @@ def alternating_opt(
         f_prev, G_loss, C_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
 
         for _ in range(max_outer):
-            W   = one_block_update("W",   W, method, options)
+            W   = one_block_update("W", W)
             if G_loss_type is not None:
-                H_G = one_block_update("H_G", H_G, method, options)
-                U_G = one_block_update("U_G", U_G, method, options)
+                H_G = one_block_update("H_G", H_G)
+                U_G = one_block_update("U_G", U_G)
             if C_loss_type is not None:
-                H_C = one_block_update("H_C", H_C, method, options)
-                U_C = one_block_update("U_C", U_C, method, options)
+                H_C = one_block_update("H_C", H_C)
+                U_C = one_block_update("U_C", U_C)
 
             f_cur, G_loss, C_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
             loss_dict['total_loss'].append(f_cur)
@@ -266,16 +328,14 @@ def alternating_opt(
             if ((f_prev - f_cur) / max(1.0, abs(f_prev)) < tol) and _ >= min_outer:
                 break
             f_prev = f_cur
-        if f_cur < best_total_loss:
-            best_total_loss = f_cur # reset
-            final_loss_dict = loss_dict
-            # Normalize columns of W to L2 norm and scale rows of H to resolve scaling ambiguity
-            norms = np.linalg.norm(W, axis=0)
-            norms[norms == 0] = 1.0
-            W = W / norms
-            # scale rows of H_G and H_C
-            H_G = H_G * norms[np.newaxis, :]
-            H_C = H_C * norms[np.newaxis, :]
-            final_factor_matrices = {"W":W, "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C}
+
+        # Normalize columns of W to L2 norm and scale rows of H to resolve scaling ambiguity
+        norms = np.linalg.norm(W, axis=0)
+        norms[norms == 0] = 1.0
+        W = W / norms
+        # scale rows of H_G and H_C
+        H_G = H_G * norms[np.newaxis, :]
+        H_C = H_C * norms[np.newaxis, :]
+        final_factor_matrices = {"W":W, "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C}
             
-    return final_factor_matrices, final_loss_dict
+    return final_factor_matrices, loss_dict

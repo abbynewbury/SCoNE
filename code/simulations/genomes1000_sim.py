@@ -138,7 +138,6 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
 
     markers_assoc_dict = {} # names of the markers that are associated with each subgroup
     if g_ps !=0:
-        #maf_by_superpop = maf_by_superpop[maf_by_superpop[superpopulations].ge(0.05).all(axis=1)].copy() # in each subgroup, MAF greater than 10%
         assert g_ps in [0.25,0.75], f"right now code only takes top or bottom 25th percentile, value {g_ps} not accepted"
         # calculate weighted af variance
         w = igsr_samples['Superpopulation code'].value_counts().to_numpy(float)
