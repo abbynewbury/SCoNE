@@ -247,7 +247,7 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
                   .nunique()
                   .pipe(lambda s: s[s > 1]).index)
     gi_phenotypic_subgroups = gi_phenotypic_subgroups[~gi_phenotypic_subgroups['IID'].isin(overlap_iids)].copy()
-    extra_subgroups_size = max(gi_phenotypic_subgroups['phenotypic_subgroup'].value_counts()) # is max of pheno subgroup 0 or 1 # TODO: change back to not everyone
+    extra_subgroups_size = 2*max(gi_phenotypic_subgroups[gi_phenotypic_subgroups['subgroup']]['phenotypic_subgroup'].value_counts()) # is max of pheno subgroup 0 or 1 # TODO: change back to not everyone
     # remove overlap samples from genetic subgroups and iid order as well
     genetic_subgroups = genetic_subgroups[~genetic_subgroups['IID'].isin(overlap_iids)].copy()
     iid_order = [i for i in iid_order if i not in overlap_iids]

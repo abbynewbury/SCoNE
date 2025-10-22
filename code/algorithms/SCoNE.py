@@ -79,9 +79,8 @@ def total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C,
     return loss, lambda_Gloss*G_loss, C_loss, regularization
 
 
-def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type):
+def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type):
     # Precompute terms independent of W
-    reg = lambda_H_G*l1_norm(H_G)+ lambda_H_C*l1_norm(H_C)
     def _forwardG(x):
         W = x.reshape(shape, order='F')
         G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
@@ -103,7 +102,7 @@ def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambd
         else:
             C_loss = 0
         # compute fun
-        loss = lambda_Gloss*G_loss + C_loss + lambda_W*l1_norm(W) + reg 
+        loss = lambda_Gloss*G_loss + C_loss
         return loss
 
     def g(x):
@@ -127,11 +126,10 @@ def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambd
 
     return f,g
 
-def make_fg_HG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type):
+def make_fg_HG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type):
     # Precompute terms independent of H_G
     C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type)
     C_loss = compute_loss(C,C_hat,C_loss_type)
-    reg = lambda_W*l1_norm(W) +  lambda_H_C*l1_norm(H_C)
     def _forward(x):
         H_G = x.reshape(shape, order='F')
         G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type) # could cut down on matrix multiplications if use precalculated Z@U_G.T for fun and jac
@@ -140,7 +138,7 @@ def make_fg_HG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lamb
         G_hat = _forward(x)
         G_loss = compute_loss(G,G_hat,G_loss_type)
         # compute fun
-        loss = lambda_Gloss*G_loss + C_loss + reg + lambda_H_G*l1_norm(H_G)
+        loss = lambda_Gloss*G_loss + C_loss
         return loss
     def g(x):
         G_hat = _forward(x)
@@ -150,11 +148,10 @@ def make_fg_HG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lamb
 
     return f,g
 
-def make_fg_HC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type):
+def make_fg_HC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type):
     # Precompute terms independent of H_C
     G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
     G_loss = compute_loss(G,G_hat,G_loss_type)
-    reg = lambda_W*l1_norm(W) +  lambda_H_G*l1_norm(H_G)
     def _forward(x):
         H_C = x.reshape(shape, order='F')
         C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type)
@@ -163,7 +160,7 @@ def make_fg_HC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lamb
         C_hat = _forward(x)
         C_loss = compute_loss(C,C_hat,C_loss_type)
         # compute fun
-        loss = lambda_Gloss*G_loss + C_loss + reg +  lambda_H_C*l1_norm(H_C)
+        loss = lambda_Gloss*G_loss + C_loss
         return loss
     def g(x):
         C_hat = _forward(x)
@@ -173,11 +170,10 @@ def make_fg_HC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lamb
 
     return f,g
 
-def make_fg_UG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type):
+def make_fg_UG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type):
     # Precompute terms independent of U_G
     C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type)
     C_loss = compute_loss(C,C_hat,C_loss_type)
-    regularization = lambda_W*l1_norm(W) +  lambda_H_G*l1_norm(H_G) +  lambda_H_C*l1_norm(H_C)
     def _forward(x):
         U_G = x.reshape(shape, order='F')
         G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
@@ -186,7 +182,7 @@ def make_fg_UG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lamb
         G_hat = _forward(x)
         G_loss =  compute_loss(G,G_hat,G_loss_type)
         # compute fun
-        loss = lambda_Gloss*G_loss + C_loss + regularization
+        loss = lambda_Gloss*G_loss + C_loss
         return loss
     def g(x):
         G_hat = _forward(x)
@@ -196,11 +192,10 @@ def make_fg_UG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lamb
 
     return f,g
 
-def make_fg_UC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type):
+def make_fg_UC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type):
     # Precompute terms independent of U_C
     G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
     G_loss = compute_loss(G,G_hat,G_loss_type)
-    regularization = lambda_W*l1_norm(W) +  lambda_H_G*l1_norm(H_G) +  lambda_H_C*l1_norm(H_C)
     def _forward(x):
         U_C = x.reshape(shape, order='F')
         C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type)
@@ -209,7 +204,7 @@ def make_fg_UC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lamb
         C_hat = _forward(x)
         C_loss = compute_loss(C,C_hat,C_loss_type)
         # compute fun
-        loss = lambda_Gloss*G_loss + C_loss + regularization
+        loss = lambda_Gloss*G_loss + C_loss
         return loss
     def g(x):
         C_hat = _forward(x)
@@ -286,9 +281,9 @@ def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, gto
         # implement early stopping (with gtol and ftol)
         if abs(f_new - f)/max(1.0, abs(f)) < ftol:
             return x_new
-
+        
         x = x_new
-
+    print(f'armijo fun(x): {fun(x)}, iterations: {it}',flush=True)
     return x
 
 def alternating_opt(
@@ -316,23 +311,23 @@ def alternating_opt(
         x0 = X.flatten(order='F') 
 
         if name == "W":
-            f,g = make_fg_W(W.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
+            f,g = make_fg_W(W.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type)
             l1 = lambda_W
         elif name == "H_G":
-            f,g = make_fg_HG(H_G.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
+            f,g = make_fg_HG(H_G.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type)
             l1 = lambda_H_G
         elif name == "H_C":
-            f,g = make_fg_HC(H_C.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
+            f,g = make_fg_HC(H_C.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type)
             l1 = lambda_H_C
         elif name == "U_G":
-            f,g = make_fg_UG(U_G.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
+            f,g = make_fg_UG(U_G.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type)
             l1 = 0
         elif name == "U_C":
-            f,g = make_fg_UC(U_C.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
+            f,g = make_fg_UC(U_C.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type)
             l1 = 0
         else:
             raise ValueError(f"Unknown block {name}")
-        x = pgd_armijo(f, g, x0, max_iter=max_inner, rho=rho, sigma=sigma, ftol=inner_ftol, gtol=inner_gtol, l1=l1) # TODO: change f to smooth part only
+        x = pgd_armijo(f, g, x0, max_iter=max_inner, rho=rho, sigma=sigma, ftol=inner_ftol, gtol=inner_gtol, l1=l1)
         #res = minimize(fun, x0, method=method, jac=True, bounds=bnds, options=options)
         return x.reshape(X.shape, order='F')
 
