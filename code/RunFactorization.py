@@ -103,7 +103,7 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
     if lambda_Gloss == 'ratio': # TODO: clean this up
         lambda_Gloss = C.sum()/G.sum()
 
-    if run_name in ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF']:
+    if run_name in ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','CoNE(Fro)']:
         return MLFlowWrapper.train_with_mlflow( 
         algorithm_func=SCoNE.alternating_opt,
         artifact_dir=artifact_dir,
@@ -199,8 +199,8 @@ executor.update_parameters(
     },
 )
 tuning_runs = ['SCoNE','SCoNE(Fro)','sHNMF','MVBC']  # all of these runs have sparsity parameters that need to be tuned 
-# testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','RGWAS','MVBC'] # TODO CHANGE BACK
-testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE']
+testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','RGWAS','MVBC'] # TODO: change back to this 
+testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','CoNE(Fro)']
 # PRELIMINARY: set up fixed params across experiments
 
 # STEP 1: hparam tuning with 1 randomly selected dataset per experiment (and then remove it from testing)
@@ -274,13 +274,13 @@ if testing:
             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C, lambda_Gloss=1,
             max_outer=50, min_outer=5, tol=1e-4, 
             sim_output_dir=sim_output_dir, exp_num=exp_map[g_ps, c_ps, e],
-            run_name=run_name,G_loss_type='kl_div' if run_name not in ['SCoNE(Fro)','C-NMF','C-CoNE'] else ('fro' if run_name=='SCoNE(Fro)' else None), 
-            C_loss_type='kl_div' if run_name not in ['SCoNE(Fro)','G-NMF','G-CoNE'] else ('fro' if run_name=='SCoNE(Fro)' else None),
-            artifact_dir=f"{os.path.dirname(artifact_dir)}/new_logs" # TODO: change back
+            run_name=run_name,G_loss_type='kl_div' if run_name not in ['CoNE(Fro)','SCoNE(Fro)','C-NMF','C-CoNE'] else ('fro' if '(Fro)' in run_name else None), 
+            C_loss_type='kl_div' if run_name not in ['CoNE(Fro)','SCoNE(Fro)','G-NMF','G-CoNE'] else ('fro' if '(Fro)' in run_name else None),
+            artifact_dir=f"{os.path.dirname(artifact_dir)}/logs"
         )
         for i, (g_ps, c_ps, e, lambda_W, lambda_H_G, lambda_H_C, run_name, idx) in enumerate(combos)
     ]
-    mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/new_logs") # TODO: change back
+    mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/logs")
     for i in exp_map.values():
         exp = mlflow.set_experiment(str(i)) # set experiment id ahead of time for slurm parallelism
     jobs = executor.map_array(_call_kwargs, cfgs)

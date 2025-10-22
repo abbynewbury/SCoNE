@@ -332,7 +332,7 @@ def alternating_opt(
             l1 = 0
         else:
             raise ValueError(f"Unknown block {name}")
-        x = pgd_armijo(f, g, x0, max_iter=max_inner, rho=rho, sigma=sigma, ftol=inner_ftol, gtol=inner_gtol, l1=l1)
+        x = pgd_armijo(f, g, x0, max_iter=max_inner, rho=rho, sigma=sigma, ftol=inner_ftol, gtol=inner_gtol, l1=l1) # TODO: change f to smooth part only
         #res = minimize(fun, x0, method=method, jac=True, bounds=bnds, options=options)
         return x.reshape(X.shape, order='F')
 
@@ -378,7 +378,9 @@ def alternating_opt(
             loss_dict['H_C_sparsity'].append(100*np.count_nonzero(H_C == 0)/ H_C.size)
             loss_dict['U_G_sparsity'].append(100*np.count_nonzero(U_G == 0)/ U_G.size) # expect to stay fairly constant over time
             loss_dict['U_C_sparsity'].append(100*np.count_nonzero(U_C == 0)/ U_C.size) # expect to stay fairly constant over time
-
+            print(f'G loss: {G_loss}',flush=True)
+            print(f'C loss: {C_loss}',flush=True)
+            print(f'regularization: {regularization}',flush=True)
             assert f_prev - f_cur>=0, f"loss increasing: {f_prev} -> {f_cur}"
             if ((f_prev - f_cur) / max(1.0, abs(f_prev)) < tol) and _ >= min_outer:
                 break
