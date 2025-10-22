@@ -78,7 +78,7 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
                     Z,rank,num_markers,
                     lambda_W, lambda_H_G, lambda_H_C,lambda_Gloss,
                     G_loss_type, C_loss_type,
-                    max_outer,min_outer,tol,nonneg,
+                    max_outer,min_outer,tol,
                     sim_output_dir, exp_num,run_name,artifact_dir): 
     output_suffix = sim_functions.get_output_file_suffix(g_ps=g_ps, c_ps=c_ps, e=e, dataset=dataset)
     print(f"{sim_output_dir}/simulation_metadata_{output_suffix}.pkl")
@@ -110,14 +110,14 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
         run_name=run_name,
         algorithm_func_kwargs={"G":G, "C":C, "Z":Z[iid_index,:],"rank":rank, "num_init":num_init,
                                "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C,"lambda_Gloss":lambda_Gloss,
-                               "method":'L-BFGS-B', "options":{'maxcor':10,'maxiter':10,'gtol':1e-5,'maxls':5,'ftol':1e-6},  # keep scipy methods and options fixed
+                                "max_inner":10, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-3,"inner_gtol":1e-8,
                                "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
-                               "max_outer":max_outer, "min_outer":min_outer, "tol":tol, "nonneg":nonneg},
+                               "max_outer":max_outer, "min_outer":min_outer, "tol":tol},
         params={"g_ps": g_ps,"c_ps":c_ps, "e": e, "dataset": dataset, "num_init":num_init,
                 "run_seed": simulation_metadata["run_seed"], "tol": tol, "max_outer": max_outer, "min_outer":min_outer,
                 "lambda_W": lambda_W, "lambda_H_G": lambda_H_G, "lambda_H_C": lambda_H_C, "lambda_Gloss":lambda_Gloss, "run_name":run_name,
                 "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
-                "method":'L-BFGS-B', "options":{'maxcor':10,'maxiter':10,'gtol':1e-5,'maxls':5,'ftol':1e-6}},
+                "max_inner":10, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-3, "inner_gtol":1e-8},
         eval_fn=cluster_evaluation.compute_sim_metrics, 
         ground_truth=ground_truth,
         experiment_name=str(exp_num))
@@ -206,15 +206,13 @@ testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE']
 # STEP 1: hparam tuning with 1 randomly selected dataset per experiment (and then remove it from testing)
 if tuning:
     combos = [(g_ps, c_ps, e, lW, lHG, lHC, rn) for e, g_ps in product(e_list, g_ps_list) for c_ps in ([0] if g_ps == 0 else c_ps_list) for (lW, lHG, lHC, rn) in product([0,0.5,1],[0,0.5,1],[0,0.5,1], tuning_runs)]
-
-
     cfgs = [
         dict(
             g_ps=g_ps, c_ps=c_ps, e=e, dataset=tuning_dataset[g_ps,c_ps, e],
             num_init = 10, num_markers=num_markers,
             Z=Z if run_name != 'sHNMF' else np.zeros((Z.shape[0],Z.shape[1])), rank=rank,
             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,lambda_Gloss=1,
-            max_outer=50, min_outer=5, tol=1e-6, nonneg=True,
+            max_outer=50, min_outer=5, tol=1e-4,
             sim_output_dir=sim_output_dir, exp_num=exp_map[g_ps,c_ps, e],
             run_name=run_name,G_loss_type='kl_div' if run_name!='SCoNE(Fro)' else 'fro', C_loss_type='kl_div' if run_name!='SCoNE(Fro)' else 'fro',
             artifact_dir=f"{os.path.dirname(artifact_dir)}/logs_tuning"
@@ -274,7 +272,7 @@ if testing:
             num_init = 10, num_markers=num_markers,
             Z=Z if run_name not in ['sHNMF','HNMF','G-NMF','C-NMF'] else np.zeros((Z.shape[0],Z.shape[1])), rank=rank,
             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C, lambda_Gloss=1,
-            max_outer=50, min_outer=5, tol=1e-6, nonneg=True,
+            max_outer=50, min_outer=5, tol=1e-4, 
             sim_output_dir=sim_output_dir, exp_num=exp_map[g_ps, c_ps, e],
             run_name=run_name,G_loss_type='kl_div' if run_name not in ['SCoNE(Fro)','C-NMF','C-CoNE'] else ('fro' if run_name=='SCoNE(Fro)' else None), 
             C_loss_type='kl_div' if run_name not in ['SCoNE(Fro)','G-NMF','G-CoNE'] else ('fro' if run_name=='SCoNE(Fro)' else None),

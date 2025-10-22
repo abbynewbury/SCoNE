@@ -235,3 +235,22 @@ class TestSCoNE(unittest.TestCase):
 # make sure SCoNE chooses init with lowest loss
 
 # make sure only eur samples in eur group
+
+# # test of PGD Armijo
+# m, n, p = 4, 3, 5
+# np.random.seed(0)
+# A = np.random.randn(p, m)
+# B = np.random.randn(p, n)
+
+# def fun(vecX):
+#     """Takes vectorized X, returns (f, grad_vec)."""
+#     X = vecX.reshape((m, n), order='F')
+#     R = A @ X - B
+#     f = 0.5 * np.sum(R**2)
+#     g = A.T @ R        # gradient w.r.t X
+#     return f, g.reshape(-1,order='F')  # flatten for optimizer
+# x0 = np.random.randn(m * n)
+# x_opt = pgd_armijo(fun, x0, lb=None, ub=None,ftol=1e-12,max_iter=2000,sigma=1e-4)
+# X_opt = x_opt.reshape((m,n), order='F')
+# X_closed_form = np.linalg.lstsq(A, B, rcond=None)[0]
+# print("‖X_opt - X_closed_form‖_F =", np.linalg.norm(X_opt - X_closed_form))
