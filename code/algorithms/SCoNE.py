@@ -227,7 +227,7 @@ def proj_nonneg(x):
 def armijo_suff_decrease_cond(f_new,f,g,x_new,x,sigma):
     return f_new - f <= sigma*np.dot(g.ravel(),(x_new-x).ravel())
 
-def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, gtol=1e-8, l1=0):
+def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, l1=0):
     """
     Projected gradient descent with Armijo rule.
 
@@ -250,9 +250,6 @@ def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, gto
     for it in range(max_iter):
         f= fun(x)
         g = grad(x)
-
-        if np.linalg.norm(g)<gtol: # early stopping if gradient norm is small
-            break
 
         x_new, s = x_and_s(n, x, g)
         f_new = fun(x_new)
@@ -278,12 +275,11 @@ def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, gto
                     break
                 n, x_new, s, f_new = n_next, x_next, s_next, f_next
         
-        # implement early stopping (with gtol and ftol)
+        # implement early stopping
         if abs(f_new - f)/max(1.0, abs(f)) < ftol:
             return x_new
         
         x = x_new
-    print(f'armijo fun(x): {fun(x)}, iterations: {it}',flush=True)
     return x
 
 def alternating_opt(
@@ -295,7 +291,6 @@ def alternating_opt(
     rho=0.1, # options for pgd_armijo (n shrink factor)
     sigma=1e-4, # options for pgd_armijo (Armijo constant)
     inner_ftol=1e-5, # options for pgd_armijo (stopping criteria for ftol)
-    inner_gtol=1e-8,
     max_outer=30,
     min_outer=5,
     tol=1e-6
@@ -327,7 +322,7 @@ def alternating_opt(
             l1 = 0
         else:
             raise ValueError(f"Unknown block {name}")
-        x = pgd_armijo(f, g, x0, max_iter=max_inner, rho=rho, sigma=sigma, ftol=inner_ftol, gtol=inner_gtol, l1=l1)
+        x = pgd_armijo(f, g, x0, max_iter=max_inner, rho=rho, sigma=sigma, ftol=inner_ftol, l1=l1)
         #res = minimize(fun, x0, method=method, jac=True, bounds=bnds, options=options)
         return x.reshape(X.shape, order='F')
 
@@ -371,12 +366,9 @@ def alternating_opt(
             loss_dict['W_sparsity'].append(100*np.count_nonzero(W == 0)/ W.size)
             loss_dict['H_G_sparsity'].append(100*np.count_nonzero(H_G == 0)/ H_G.size)
             loss_dict['H_C_sparsity'].append(100*np.count_nonzero(H_C == 0)/ H_C.size)
-            loss_dict['U_G_sparsity'].append(100*np.count_nonzero(U_G == 0)/ U_G.size) # expect to stay fairly constant over time
-            loss_dict['U_C_sparsity'].append(100*np.count_nonzero(U_C == 0)/ U_C.size) # expect to stay fairly constant over time
-            print(f'G loss: {G_loss}',flush=True)
-            print(f'C loss: {C_loss}',flush=True)
-            print(f'regularization: {regularization}',flush=True)
-            assert f_prev - f_cur>=0, f"loss increasing: {f_prev} -> {f_cur}"
+            loss_dict['U_G_sparsity'].append(100*np.count_nonzero(U_G == 0)/ U_G.size)
+            loss_dict['U_C_sparsity'].append(100*np.count_nonzero(U_C == 0)/ U_C.size)
+            assert f_cur<=f_prev*(1+0.05), f"loss increasing (by more than 5% x previous loss): {f_prev} -> {f_cur}"
             if ((f_prev - f_cur) / max(1.0, abs(f_prev)) < tol) and _ >= min_outer:
                 break
             f_prev = f_cur

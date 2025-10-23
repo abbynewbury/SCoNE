@@ -61,7 +61,7 @@ bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
 rank = 3
 num_markers = 100
-tuning = False # to run sparsity tuning step
+tuning = True # to run sparsity tuning step
 testing = True # to run testing step
 # PARAMETERS
 
@@ -110,14 +110,14 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
         run_name=run_name,
         algorithm_func_kwargs={"G":G, "C":C, "Z":Z[iid_index,:],"rank":rank, "num_init":num_init,
                                "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C,"lambda_Gloss":lambda_Gloss,
-                                "max_inner":10, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-3,"inner_gtol":1e-8,
+                                "max_inner":20, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4,
                                "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
                                "max_outer":max_outer, "min_outer":min_outer, "tol":tol},
         params={"g_ps": g_ps,"c_ps":c_ps, "e": e, "dataset": dataset, "num_init":num_init,
                 "run_seed": simulation_metadata["run_seed"], "tol": tol, "max_outer": max_outer, "min_outer":min_outer,
                 "lambda_W": lambda_W, "lambda_H_G": lambda_H_G, "lambda_H_C": lambda_H_C, "lambda_Gloss":lambda_Gloss, "run_name":run_name,
                 "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
-                "max_inner":10, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-3, "inner_gtol":1e-8},
+                "max_inner":50, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-5},
         eval_fn=cluster_evaluation.compute_sim_metrics, 
         ground_truth=ground_truth,
         experiment_name=str(exp_num))
@@ -199,8 +199,7 @@ executor.update_parameters(
     },
 )
 tuning_runs = ['SCoNE','SCoNE(Fro)','sHNMF','MVBC']  # all of these runs have sparsity parameters that need to be tuned 
-testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','RGWAS','MVBC'] # TODO: change back to this 
-testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','CoNE(Fro)']
+testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','RGWAS','MVBC'] 
 # PRELIMINARY: set up fixed params across experiments
 
 # STEP 1: hparam tuning with 1 randomly selected dataset per experiment (and then remove it from testing)
@@ -212,7 +211,7 @@ if tuning:
             num_init = 10, num_markers=num_markers,
             Z=Z if run_name != 'sHNMF' else np.zeros((Z.shape[0],Z.shape[1])), rank=rank,
             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,lambda_Gloss=1,
-            max_outer=50, min_outer=5, tol=1e-4,
+            max_outer=50, min_outer=5, tol=1e-6,
             sim_output_dir=sim_output_dir, exp_num=exp_map[g_ps,c_ps, e],
             run_name=run_name,G_loss_type='kl_div' if run_name!='SCoNE(Fro)' else 'fro', C_loss_type='kl_div' if run_name!='SCoNE(Fro)' else 'fro',
             artifact_dir=f"{os.path.dirname(artifact_dir)}/logs_tuning"
@@ -272,7 +271,7 @@ if testing:
             num_init = 10, num_markers=num_markers,
             Z=Z if run_name not in ['sHNMF','HNMF','G-NMF','C-NMF'] else np.zeros((Z.shape[0],Z.shape[1])), rank=rank,
             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C, lambda_Gloss=1,
-            max_outer=50, min_outer=5, tol=1e-4, 
+            max_outer=50, min_outer=5, tol=1e-6, 
             sim_output_dir=sim_output_dir, exp_num=exp_map[g_ps, c_ps, e],
             run_name=run_name,G_loss_type='kl_div' if run_name not in ['CoNE(Fro)','SCoNE(Fro)','C-NMF','C-CoNE'] else ('fro' if '(Fro)' in run_name else None), 
             C_loss_type='kl_div' if run_name not in ['CoNE(Fro)','SCoNE(Fro)','G-NMF','G-CoNE'] else ('fro' if '(Fro)' in run_name else None),
