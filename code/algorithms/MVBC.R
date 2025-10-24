@@ -15,10 +15,12 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
   sel <- 7:ncol(hdr)
   G   <- fread(G_path, select = sel, colClasses = list(numeric = sel), integer64 = "double")
   G   <- as.matrix(G)
+  G <- G/sum(G)
 
   # --- Read C (.npy) ---
   C <- npyLoad(C_path,"integer")
   storage.mode(C) <- "double"
+  C <- C/sum(C)
 
   # --- Run MVBC ---
   remaining <- seq_len(nrow(G)) # indices of individuals still under consideration

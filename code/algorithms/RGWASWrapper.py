@@ -15,7 +15,6 @@ def RGWASWrapper(iid_index_path, r_path, G_path, C_path, Z_path, rank=3, num_ini
     end = r_output.rfind('}')
     json_str = r_output[start:end+1]
     parsed = json.loads(json_str)
-    print(parsed['lls'])
     if parsed['ll']=="NA": # all runs failed
         return False, "all runs failed (NA log-likelihood)"
     

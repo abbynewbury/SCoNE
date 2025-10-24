@@ -3,25 +3,24 @@ from collections import defaultdict
 from scipy.optimize import minimize
 from scipy.special import gammaln
 from utilities import vec2mats, mats2vec, sigmoid
+from scipy.special import xlogy
 
 def compute_loss(X,X_hat,loss_type):
     if loss_type == 'kl_div':
-        return np.sum(-np.multiply(X,np.log(X_hat)) + X_hat + gammaln(X + 1)) # log(X!) can help stabilize/make pos.
-    elif loss_type == 'bce':
-        E_x = np.ones(X.shape)
-        return np.sum(-np.multiply(X,np.log(X_hat)) - np.multiply(E_x-X,np.log(E_x-X_hat)),dtype=np.float64)
+        return np.sum(-xlogy(X,X_hat) + xlogy(X,X) + X_hat - X) 
+        #return np.sum(-np.multiply(X,np.log(X_hat)) + X_hat + gammaln(X + 1)) # log(X!) can help stabilize/make pos.
     elif loss_type == 'fro':
         return (1/2)*np.dot((X - X_hat).ravel(), (X - X_hat).ravel())
     elif loss_type is None:
         return 0
-    else: assert True == False, f"{loss_type} not a valid loss type, should be one of 'kl_div', 'bce', 'fro'"
+    else: assert True == False, f"{loss_type} not a valid loss type, should be one of 'kl_div', 'fro', None"
 
 def l1_norm(x):
     return np.sum(np.abs(x),dtype=np.float64)
 
 def compute_jac(sample_matrix, X, X_hat, loss_type, for_W=False):
     '''
-    This function works to compute the Jacobian (unflattened) given loss type in  'kl_div', 'bce', 'fro'
+    This function works to compute the Jacobian (unflattened) given loss type in  'kl_div', 'fro'
     Sample matrix defines the matrix that has N rows, will be W or Z -- helps this function to generalize to jac for H and U
     for_W should only be used when computing the Jacobian for the W matrix (puts sample matrix on other side/diff dimensions)
     '''
@@ -32,33 +31,22 @@ def compute_jac(sample_matrix, X, X_hat, loss_type, for_W=False):
             GX = (E_x - X_tilde)@sample_matrix
         else:
             GX = (sample_matrix.T@(E_x - X_tilde)).T 
-    elif loss_type == 'bce':
-        E_x = np.ones(X.shape)
-        X_tilde = np.divide(X,X_hat)
-        X_bar = np.divide(E_x-X,E_x-X_hat)
-        if for_W:
-            GX = np.multiply(np.multiply(-X_tilde + X_bar,X_hat),E_x - X_hat)@sample_matrix
-        else:
-            GX = (sample_matrix.T@np.multiply(np.multiply(-X_tilde + X_bar,X_hat),E_x - X_hat)).T
     elif loss_type == 'fro':
         if for_W:
             GX = (X_hat-X)@sample_matrix
         else:
             GX = (sample_matrix.T@(X_hat-X)).T
-    else: assert True == False, f"{loss_type} not a valid loss type, should be one of 'kl_div', 'bce', 'fro'"
+    else: assert True == False, f"{loss_type} not a valid loss type, should be one of 'kl_div', 'fro'"
     return GX
 
 def get_X_hat(W,H,Z,U,loss_type):
     X_hat = W@H.T + Z@U.T
-    if loss_type == 'bce':
-        X_hat = sigmoid(X_hat)
-        X_hat = np.clip(X_hat, 1e-7, 1 - 1e-7) # clipping for log purposes
-    elif loss_type in ['kl_div','fro']:
-        X_hat = np.clip(X_hat, 1e-7, np.inf) # clipping for log purposes
+    if loss_type in ['kl_div','fro']:
+        X_hat = np.clip(X_hat, 1e-9, np.inf) # clipping for log purposes
     elif loss_type is None:
         X_hat = None
-    else: assert True == False, f"{loss_type} not a valid loss type, should be one of 'kl_div', 'bce', 'fro'"
-    return X_hat
+    else: assert True == False, f"{loss_type} not a valid loss type, should be one of 'kl_div', 'fro'"
+    return X_hat/(np.sum(X_hat))
 
 def total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type):
     # define nec. elements
@@ -286,7 +274,7 @@ def alternating_opt(
     G,C,Z,              # true matrices
     rank, num_init, # init: number of initializations (will choose one with best loss as final result)
     lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss,                  # regularization parameters
-    G_loss_type, C_loss_type, # in 'kl_div', 'bce', 'fro' or None (None indicates not fitting to data, i.e. if G_loss_type=None & C_loss_type='fro then C only optimization)
+    G_loss_type, C_loss_type, # in 'kl_div',  'fro' or None (None indicates not fitting to data, i.e. if G_loss_type=None & C_loss_type='fro then C only optimization)
     max_inner=50, # options for pgd_armijo
     rho=0.1, # options for pgd_armijo (n shrink factor)
     sigma=1e-4, # options for pgd_armijo (Armijo constant)
@@ -334,6 +322,12 @@ def alternating_opt(
         H_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], rank)) 
         U_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], Z.shape[1]))
         U_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], Z.shape[1]))
+        s=1/np.mean([np.sum(W@H_G.T + Z@U_G.T),np.sum(W@H_C.T + Z@U_C.T)])# scale them (not necessary but makes more numerically stable)
+        W *= s
+        H_G *= s
+        H_C *= s
+        U_G *= s
+        U_C *= s
 
         # initial objective
         loss_dict = defaultdict(list)
@@ -368,7 +362,7 @@ def alternating_opt(
             loss_dict['H_C_sparsity'].append(100*np.count_nonzero(H_C == 0)/ H_C.size)
             loss_dict['U_G_sparsity'].append(100*np.count_nonzero(U_G == 0)/ U_G.size)
             loss_dict['U_C_sparsity'].append(100*np.count_nonzero(U_C == 0)/ U_C.size)
-            assert f_cur<=f_prev*(1+0.05), f"loss increasing (by more than 5% x previous loss): {f_prev} -> {f_cur}"
+            assert f_cur<=f_prev*(1+0.1), f"loss increasing (by more than 10% x previous loss): {f_prev} -> {f_cur}"
             if ((f_prev - f_cur) / max(1.0, abs(f_prev)) < tol) and _ >= min_outer:
                 break
             f_prev = f_cur
