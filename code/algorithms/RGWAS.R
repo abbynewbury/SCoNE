@@ -23,9 +23,8 @@ storage.mode(C) <- "double"
 Z <- read.table(Z_path, header = FALSE, sep = "", stringsAsFactors = FALSE, check.names = FALSE)
 iid_index <- npyLoad(iid_index_path,"integer") 
 iid_index <- iid_index + 1
-Z <- Z[iid_index,,]
+Z <- Z[iid_index,-ncol(Z)] # last column of Z is perfectly multicollinear with rest
 Z <- data.matrix(Z)
-
 covars <- cbind(1,G,Z)
 C_binary <- (C != 0) + 0L
 result <- mfmr(Yb=C_binary,  Yq=NULL, G=covars, K=rank, nrun=num_init)

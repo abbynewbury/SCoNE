@@ -12,6 +12,8 @@ from sklearn.preprocessing import StandardScaler
 import sys
 from pathlib import Path
 import re
+import hashlib
+
 
 def get_genetic_pcs(map_ped_filepath,output_dir,ndim=20):
     # make map/ped file into bfile
@@ -87,6 +89,10 @@ def get_output_file_suffix(e,g_ps,c_ps,dataset):
 def rs(streams,stream_name):
         return int(streams[stream_name].integers(1, 2**31 - 1))
 
+def seed_from(*xs):
+    s = "|".join(f"{x:.8g}" if isinstance(x, float) else str(x) for x in xs)
+    return int(hashlib.md5(s.encode()).hexdigest()[:8], 16)  # 32-bit int
+
 def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_filepath,
                           intermediate_file_dir,intermediate_file_suffix,output_dir,output_file_suffix,
                           g_ps,c_ps,g,e,M,num_clinical_assoc,num_markers, run_seed):
@@ -127,8 +133,8 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
     parent_ss = np.random.SeedSequence(run_seed)
     names = ["env_noise", "extra_sub", "assoc", "poisson"]
     streams = {name: np.random.default_rng(ss) for name, ss in zip(names, parent_ss.spawn(len(names)))}
-    streams["markers"] =  np.random.default_rng(int(g_ps*100)) # fix markers within a marker subset defined by g_ps
-    streams["ps_noise"] = np.random.default_rng(int(c_ps*100)) # fix superpopulation shift in a subset defined by c_ps
+    streams["markers"] =  np.random.default_rng(seed_from("markers", g_ps)) # fix markers within a marker subset defined by g_ps
+    streams["ps_noise"] = np.random.default_rng(seed_from("ps_noise", c_ps)) # fix superpopulation shift in a subset defined by c_ps
 
     # 1. Read in allele frequencies per 5 superpopulations to estimate af variance across groups OR pull from superpopulation EUR only
     maf_by_superpop = pd.read_csv(maf_by_superpop_filepath,sep='\s+')
