@@ -53,17 +53,17 @@ np.random.seed(42)
 
 # PARAMETERS
 # generate all combinations of e and g_ps, c_ps variables
-e_list = [0.25, 0.50, 0.75, 1] 
-g_ps_list = [0,0.25,0.75]
-c_ps_list = [0,0.1,0.2,0.3,0.4,0.5,1]
-dataset_list = range(21) # 21 random datasets for each combination
+e_list = [0.4,0.6,0.8,1]
+g_ps_list = [0,0.25] # TODO: change back to [0,0.25,0.75]
+c_ps_list = [0,0.1,0.2,0.3] # TODO: change back to [0,0.1,0.2,0.3,0.4,0.5,1]
+dataset_list = range(11) # 21 random datasets for each combination # TODO: change back to 21
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
 rank = 3
 num_markers = 100
 tuning = False # to run sparsity tuning step
-testing = False # to run testing step
-loss_and_consistency_check = True
+testing = True # to run testing step
+loss_and_consistency_check = False
 # PARAMETERS
 
 # opt parameters
@@ -109,9 +109,8 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
         lambda_Gloss = C.sum()/G.sum()
 
     if run_name in ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','CoNE(Fro)']:
-        if 'HNMF' not in run_name:
-            G = G/G.sum()
-            C = C/C.sum()
+        G = G/G.sum()
+        C = C/C.sum()
         return MLFlowWrapper.train_with_mlflow( 
         algorithm_func=SCoNE.alternating_opt,
         artifact_dir=artifact_dir,
@@ -194,7 +193,7 @@ for i, (g_ps,c_ps,e) in enumerate([(g_ps, c_ps, e) for e, g_ps in product(e_list
 executor = submitit.AutoExecutor(folder=f"{os.path.dirname(artifact_dir)}/slurm_logs")
 executor.update_parameters(
     slurm_job_name="fact-grid",
-    timeout_min=15, # TODO: increase to 400 min
+    timeout_min=60, # TODO: increase to 400 min
     cpus_per_task=1,
     mem_gb=3,
     slurm_array_parallelism=200,
@@ -208,12 +207,12 @@ executor.update_parameters(
     },
 )
 tuning_runs = ['SCoNE','SCoNE(Fro)','sHNMF','MVBC']  # all of these runs have sparsity parameters that need to be tuned 
-testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','RGWAS','MVBC'] 
+testing_runs = ['C-NMF','C-CoNE','HNMF','CoNE'] # TODO: change back to ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','RGWAS','MVBC']
 # PRELIMINARY: set up fixed params across experiments
 
 # STEP 1: hparam tuning with 1 randomly selected dataset per experiment (and then remove it from testing)
 if tuning:
-    combos = [(g_ps, c_ps, e, lW, lHG, lHC, rn) for e, g_ps in product(e_list, g_ps_list) for c_ps in ([0] if g_ps == 0 else c_ps_list) for (lW, lHG, lHC, rn) in product([0,1e-2,.1],[0,1e-2,.1],[0,1e-2,.1], tuning_runs)]
+    combos = [(g_ps, c_ps, e, lW, lHG, lHC, rn) for e, g_ps in product(e_list, g_ps_list) for c_ps in ([0] if g_ps == 0 else [i for i in c_ps_list if i!=0]) for (lW, lHG, lHC, rn) in product([0,1e-2,.1],[0,1e-2,.1],[0,1e-2,.1], tuning_runs)]
     cfgs = [
         dict(
             g_ps=g_ps, c_ps=c_ps, e=e, dataset=tuning_dataset[g_ps,c_ps, e],
@@ -262,7 +261,7 @@ if testing:
     # build combos excluding the tuning dataset 
     combos = []
     for (g_ps,e) in product(g_ps_list, e_list):
-        for c_ps in ([0] if g_ps == 0 else c_ps_list):
+        for c_ps in ([0] if g_ps == 0 else [i for i in c_ps_list if i!=0]):
             tune_idx = tuning_dataset[g_ps, c_ps, e]
             other_idx = [i for i in dataset_list if i != tune_idx]
             for run_name in testing_runs:
@@ -321,7 +320,7 @@ if loss_and_consistency_check:
             num_init = 1, num_markers=num_markers,
             Z=Z, rank=rank,
             lambda_W=0, lambda_H_G=0, lambda_H_C=0, lambda_Gloss=1, # TODO: fix lambda values
-            max_outer=max_outer, min_outer=5, tol=1e-6, 
+            max_outer=max_outer, min_outer=5, tol=1e-5, 
             sim_output_dir=sim_output_dir, exp_num=0,
             run_name="SCoNE",G_loss_type='kl_div', 
             C_loss_type='kl_div',

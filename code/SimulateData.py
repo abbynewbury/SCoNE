@@ -1,8 +1,8 @@
 #! /gpfs/commons/home/anewbury/miniconda/envs/jupyter/bin/python3
 #SBATCH --job-name=SimulateData
 #SBATCH --nodes=1
-#SBATCH --mem=30G
-#SBATCH --cpus-per-task=8
+#SBATCH --mem=15G
+#SBATCH --cpus-per-task=4
 #SBATCH --time=120:00:00
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=anewbury@nygenome.org
@@ -20,7 +20,7 @@ import sys
 from itertools import product
 from joblib import Parallel, delayed
 from functools import partial
-
+# TODO: change mem back to 30G and cpu back to 8
 
 # DEFINE PATHS
 intermediate_plink_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/intermediate_plink'
@@ -45,10 +45,10 @@ evaluate_sim = False
 run_gwas = False  # only will run if run_gwas=True AND evaluate_sim=True 
 # generate all combinations for 5 scenarios
 g = 10 # 10 linked markers
-e_list = [0.25, 0.50, 0.75, 1]
+e_list = [0.4,0.6,0.8,1]
 g_ps_list = [0,0.25,0.75]
 c_ps_list = [0,0.1,0.2,0.3,0.4,0.5,1]
-dataset_list = range(1) # 21 random datasets for each combination # TODO: make 21
+dataset_list = range(11) # 21 random datasets for each combination # TODO: make 21
 combos = [(e, g_ps, c_ps, d) for e, g_ps in product(e_list, g_ps_list) for c_ps in ([0] if g_ps == 0 else c_ps_list) for d in dataset_list]
 # PARAMETERS
 
