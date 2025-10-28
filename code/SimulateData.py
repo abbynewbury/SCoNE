@@ -48,7 +48,7 @@ g = 10 # 10 linked markers
 e_list = [0.25, 0.50, 0.75, 1]
 g_ps_list = [0,0.25,0.75]
 c_ps_list = [0,0.1,0.2,0.3,0.4,0.5,1]
-dataset_list = range(21) # 21 random datasets for each combination
+dataset_list = range(1) # 21 random datasets for each combination # TODO: make 21
 combos = [(e, g_ps, c_ps, d) for e, g_ps in product(e_list, g_ps_list) for c_ps in ([0] if g_ps == 0 else c_ps_list) for d in dataset_list]
 # PARAMETERS
 

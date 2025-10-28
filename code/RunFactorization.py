@@ -56,13 +56,14 @@ np.random.seed(42)
 e_list = [0.25, 0.50, 0.75, 1] 
 g_ps_list = [0,0.25,0.75]
 c_ps_list = [0,0.1,0.2,0.3,0.4,0.5,1]
-dataset_list = range(11) # 11 random datasets for each combination
+dataset_list = range(21) # 21 random datasets for each combination
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
 rank = 3
 num_markers = 100
-tuning = True # to run sparsity tuning step
-testing = True # to run testing step
+tuning = False # to run sparsity tuning step
+testing = False # to run testing step
+loss_and_consistency_check = True
 # PARAMETERS
 
 # read in Z
@@ -179,19 +180,20 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
 os.makedirs(artifact_dir, exist_ok=True)
 os.makedirs(f"{os.path.dirname(artifact_dir)}/slurm_logs", exist_ok=True)
 os.makedirs(f"{os.path.dirname(artifact_dir)}/logs_tuning", exist_ok=True)
+os.makedirs(f"{os.path.dirname(artifact_dir)}/logs_loss_consistency", exist_ok=True)
 
 # PRELIMINARY: set up fixed params across experiments
 exp_map = {}
 tuning_dataset = {}
 for i, (g_ps,c_ps,e) in enumerate([(g_ps, c_ps, e) for e, g_ps in product(e_list, g_ps_list) for c_ps in ([0] if g_ps == 0 else c_ps_list)]):
     key = (g_ps,c_ps, e)
-    tuning_dataset[key] = np.random.randint(0, 11)
+    tuning_dataset[key] = np.random.randint(0, len(dataset_list))
     exp_map[key] = i
 # submit as a SLURM array (adjust params as needed)
 executor = submitit.AutoExecutor(folder=f"{os.path.dirname(artifact_dir)}/slurm_logs")
 executor.update_parameters(
     slurm_job_name="fact-grid",
-    timeout_min=300,
+    timeout_min=400,
     cpus_per_task=1,
     mem_gb=3,
     slurm_array_parallelism=200,
@@ -248,7 +250,7 @@ if testing:
         all_runs = pd.concat(all_runs, ignore_index=True)
         all_runs.columns=[i.replace('params.','').replace('metrics.','') for i in all_runs.columns]
         all_runs[['e','g_ps','c_ps','lambda_W','lambda_H_G','lambda_H_C']]  = all_runs[['e','g_ps','c_ps','lambda_W','lambda_H_G','lambda_H_C']].astype("float64") 
-        idx = all_runs.groupby(['run_name', 'g_ps','c_ps', 'e'])["nmi"].idxmin()
+        idx = all_runs.groupby(['run_name', 'g_ps','c_ps', 'e'])["nmi"].idxmax()
         best = (
             all_runs.loc[idx, all_runs.columns]
             .reset_index(drop=True)
@@ -291,3 +293,40 @@ if testing:
     jobs = executor.map_array(_call_kwargs, cfgs)
 
 
+# for one run of SCoNE, check loss and confidence intervals for NMI over time (for null scenario)
+if loss_and_consistency_check:
+    # get correct lambda params
+    mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/logs_tuning")
+    client = MlflowClient()
+    # Get all experiments
+    all_runs = []
+    for exp in client.search_experiments():
+        df = mlflow.search_runs([exp.experiment_id])
+        all_runs.append(df)
+    all_runs = pd.concat(all_runs, ignore_index=True)
+    all_runs.columns=[i.replace('params.','').replace('metrics.','') for i in all_runs.columns]
+    all_runs[['e','g_ps','c_ps','lambda_W','lambda_H_G','lambda_H_C']]  = all_runs[['e','g_ps','c_ps','lambda_W','lambda_H_G','lambda_H_C']].astype("float64") 
+    idx = all_runs.groupby(['run_name', 'g_ps','c_ps', 'e'])["nmi"].idxmax()
+    best = (
+        all_runs.loc[idx, all_runs.columns]
+        .reset_index(drop=True)
+    )
+    matching_best_run = best[(best['run_name']=="SCoNE")&(best['g_ps']==0)&(best['c_ps']==0)&(best['e']==1)].copy()
+    assert matching_best_run.shape[0] == 1
+    lambda_W, lambda_H_G, lambda_H_C = matching_best_run[['lambda_W','lambda_H_G','lambda_H_C']].values[0].tolist()
+
+    cfgs = [ dict(
+            g_ps=0, c_ps=0, e=1, dataset=0,
+            num_init = 1, num_markers=num_markers,
+            Z=Z, rank=rank,
+            lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C, lambda_Gloss=1,
+            max_outer=50, min_outer=5, tol=1e-8, 
+            sim_output_dir=sim_output_dir, exp_num=exp_map[g_ps, c_ps, e],
+            run_name="SCoNE",G_loss_type='kl_div', 
+            C_loss_type='kl_div',
+            artifact_dir=f"{os.path.dirname(artifact_dir)}/logs_loss_consistency"
+        )
+        for i in range(10)
+        ]
+    mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/loss_and_consistency_check")
+    jobs = executor.map_array(_call_kwargs, cfgs)

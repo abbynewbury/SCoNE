@@ -133,8 +133,8 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
     parent_ss = np.random.SeedSequence(run_seed)
     names = ["env_noise", "extra_sub", "assoc", "poisson"]
     streams = {name: np.random.default_rng(ss) for name, ss in zip(names, parent_ss.spawn(len(names)))}
-    streams["markers"] =  np.random.default_rng(seed_from("markers", g_ps)) # fix markers within a marker subset defined by g_ps
-    streams["ps_noise"] = np.random.default_rng(seed_from("ps_noise", c_ps)) # fix superpopulation shift in a subset defined by c_ps
+    streams["markers"] =  np.random.default_rng(seed_from("markers")) # fix null markers regardless of g_ps
+    streams["ps_noise"] = np.random.default_rng(seed_from("ps_noise")) # fix superpopulation shift in a subset defined by c_ps
 
     # 1. Read in allele frequencies per 5 superpopulations to estimate af variance across groups OR pull from superpopulation EUR only
     maf_by_superpop = pd.read_csv(maf_by_superpop_filepath,sep='\s+')
@@ -292,8 +292,9 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
 
     # 4. simulate M binary clinical features
     # start with baseline probabilities
-    sp2bump = {sp: streams["ps_noise"].uniform(-c_ps, c_ps)
-        for sp in igsr_samples['Superpopulation code'].unique()}
+    present = [sp for sp in igsr_samples['Superpopulation code'].unique()]
+    vals  = np.linspace(0, c_ps, len(present))
+    sp2bump = dict(zip(present, vals))
     subj_bump = (igsr_samples
                 .set_index('IID')['Superpopulation code']
                 .reindex(iid_order).map(sp2bump).to_numpy())  # shape (n,)
@@ -301,7 +302,7 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
     clip01 = lambda x: np.clip(x, 1e-6, None)
 
     # baseline (add ps bump, broadcast across M)
-    C = streams["poisson"].poisson(clip01(0.1 + subj_bump)[:, None], size=(len(iid_order), M))
+    C = streams["poisson"].poisson(clip01(0.2 + subj_bump)[:, None], size=(len(iid_order), M))
     clinical_assoc_df_rows = [] # index of clinical vars that are associated (and their strength)
     for phenotypic_subgroup in phenotypic_subgroups['phenotypic_subgroup'].unique():
         # index of randomly chosen, associated clinical variables 
