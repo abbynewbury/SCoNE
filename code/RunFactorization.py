@@ -66,6 +66,10 @@ testing = False # to run testing step
 loss_and_consistency_check = True
 # PARAMETERS
 
+# opt parameters
+max_outer = 100
+
+
 # read in Z
 Z_df = pd.read_csv(f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.Q',sep='\s+',header=None)
 Z = Z_df[range(5)].to_numpy() 
@@ -108,23 +112,20 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
         if 'HNMF' not in run_name:
             G = G/G.sum()
             C = C/C.sum()
-            norm=True
-        else:
-            norm=False
         return MLFlowWrapper.train_with_mlflow( 
         algorithm_func=SCoNE.alternating_opt,
         artifact_dir=artifact_dir,
         run_name=run_name,
         algorithm_func_kwargs={"G":G, "C":C, "Z":Z[iid_index,:],"rank":rank, "num_init":num_init,
                                "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C,"lambda_Gloss":lambda_Gloss,
-                                "max_inner":20, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4,
+                                "max_inner":50, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4,
                                "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
-                               "max_outer":max_outer, "min_outer":min_outer, "tol":tol, "norm":norm},
+                               "max_outer":max_outer, "min_outer":min_outer, "tol":tol},
         params={"g_ps": g_ps,"c_ps":c_ps, "e": e, "dataset": dataset, "num_init":num_init,
                 "run_seed": simulation_metadata["run_seed"], "tol": tol, "max_outer": max_outer, "min_outer":min_outer,
                 "lambda_W": lambda_W, "lambda_H_G": lambda_H_G, "lambda_H_C": lambda_H_C, "lambda_Gloss":lambda_Gloss, "run_name":run_name,
                 "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
-                "max_inner":50, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-5, "norm":norm},
+                "max_inner":50, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4},
         eval_fn=cluster_evaluation.compute_sim_metrics, 
         ground_truth=ground_truth,
         experiment_name=str(exp_num))
@@ -193,7 +194,7 @@ for i, (g_ps,c_ps,e) in enumerate([(g_ps, c_ps, e) for e, g_ps in product(e_list
 executor = submitit.AutoExecutor(folder=f"{os.path.dirname(artifact_dir)}/slurm_logs")
 executor.update_parameters(
     slurm_job_name="fact-grid",
-    timeout_min=400,
+    timeout_min=15, # TODO: increase to 400 min
     cpus_per_task=1,
     mem_gb=3,
     slurm_array_parallelism=200,
@@ -219,7 +220,7 @@ if tuning:
             num_init = 10, num_markers=num_markers,
             Z=Z if run_name != 'sHNMF' else np.zeros((Z.shape[0],Z.shape[1])), rank=rank,
             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,lambda_Gloss=1,
-            max_outer=50, min_outer=5, tol=1e-8,
+            max_outer=max_outer, min_outer=5, tol=1e-6,
             sim_output_dir=sim_output_dir, exp_num=exp_map[g_ps,c_ps, e],
             run_name=run_name,G_loss_type='kl_div' if run_name!='SCoNE(Fro)' else 'fro', C_loss_type='kl_div' if run_name!='SCoNE(Fro)' else 'fro',
             artifact_dir=f"{os.path.dirname(artifact_dir)}/logs_tuning"
@@ -279,7 +280,7 @@ if testing:
             num_init = 10, num_markers=num_markers,
             Z=Z if run_name not in ['sHNMF','HNMF','G-NMF','C-NMF'] else np.zeros((Z.shape[0],Z.shape[1])), rank=rank,
             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C, lambda_Gloss=1,
-            max_outer=50, min_outer=5, tol=1e-8, 
+            max_outer=max_outer, min_outer=5, tol=1e-6, 
             sim_output_dir=sim_output_dir, exp_num=exp_map[g_ps, c_ps, e],
             run_name=run_name,G_loss_type='kl_div' if run_name not in ['CoNE(Fro)','SCoNE(Fro)','C-NMF','C-CoNE'] else ('fro' if '(Fro)' in run_name else None), 
             C_loss_type='kl_div' if run_name not in ['CoNE(Fro)','SCoNE(Fro)','G-NMF','G-CoNE'] else ('fro' if '(Fro)' in run_name else None),
@@ -295,38 +296,39 @@ if testing:
 
 # for one run of SCoNE, check loss and confidence intervals for NMI over time (for null scenario)
 if loss_and_consistency_check:
-    # get correct lambda params
-    mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/logs_tuning")
-    client = MlflowClient()
-    # Get all experiments
-    all_runs = []
-    for exp in client.search_experiments():
-        df = mlflow.search_runs([exp.experiment_id])
-        all_runs.append(df)
-    all_runs = pd.concat(all_runs, ignore_index=True)
-    all_runs.columns=[i.replace('params.','').replace('metrics.','') for i in all_runs.columns]
-    all_runs[['e','g_ps','c_ps','lambda_W','lambda_H_G','lambda_H_C']]  = all_runs[['e','g_ps','c_ps','lambda_W','lambda_H_G','lambda_H_C']].astype("float64") 
-    idx = all_runs.groupby(['run_name', 'g_ps','c_ps', 'e'])["nmi"].idxmax()
-    best = (
-        all_runs.loc[idx, all_runs.columns]
-        .reset_index(drop=True)
-    )
-    matching_best_run = best[(best['run_name']=="SCoNE")&(best['g_ps']==0)&(best['c_ps']==0)&(best['e']==1)].copy()
-    assert matching_best_run.shape[0] == 1
-    lambda_W, lambda_H_G, lambda_H_C = matching_best_run[['lambda_W','lambda_H_G','lambda_H_C']].values[0].tolist()
+    # # get correct lambda params # TODO - uncomment
+    # mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/logs_tuning")
+    # client = MlflowClient()
+    # # Get all experiments
+    # all_runs = []
+    # for exp in client.search_experiments():
+    #     df = mlflow.search_runs([exp.experiment_id])
+    #     all_runs.append(df)
+    # all_runs = pd.concat(all_runs, ignore_index=True)
+    # all_runs.columns=[i.replace('params.','').replace('metrics.','') for i in all_runs.columns]
+    # all_runs[['e','g_ps','c_ps','lambda_W','lambda_H_G','lambda_H_C']]  = all_runs[['e','g_ps','c_ps','lambda_W','lambda_H_G','lambda_H_C']].astype("float64") 
+    # idx = all_runs.groupby(['run_name', 'g_ps','c_ps', 'e'])["nmi"].idxmax()
+    # best = (
+    #     all_runs.loc[idx, all_runs.columns]
+    #     .reset_index(drop=True)
+    # )
+    # matching_best_run = best[(best['run_name']=="SCoNE")&(best['g_ps']==0)&(best['c_ps']==0)&(best['e']==1)].copy()
+    # assert matching_best_run.shape[0] == 1
+    # lambda_W, lambda_H_G, lambda_H_C = matching_best_run[['lambda_W','lambda_H_G','lambda_H_C']].values[0].tolist()
 
     cfgs = [ dict(
             g_ps=0, c_ps=0, e=1, dataset=0,
             num_init = 1, num_markers=num_markers,
             Z=Z, rank=rank,
-            lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C, lambda_Gloss=1,
-            max_outer=50, min_outer=5, tol=1e-8, 
-            sim_output_dir=sim_output_dir, exp_num=exp_map[g_ps, c_ps, e],
+            lambda_W=0, lambda_H_G=0, lambda_H_C=0, lambda_Gloss=1, # TODO: fix lambda values
+            max_outer=max_outer, min_outer=5, tol=1e-6, 
+            sim_output_dir=sim_output_dir, exp_num=0,
             run_name="SCoNE",G_loss_type='kl_div', 
             C_loss_type='kl_div',
             artifact_dir=f"{os.path.dirname(artifact_dir)}/logs_loss_consistency"
         )
         for i in range(10)
         ]
-    mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/loss_and_consistency_check")
+    mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/logs_loss_consistency")
+    exp = mlflow.set_experiment(str(0))
     jobs = executor.map_array(_call_kwargs, cfgs)

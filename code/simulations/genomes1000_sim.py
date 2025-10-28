@@ -302,7 +302,7 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
     clip01 = lambda x: np.clip(x, 1e-6, None)
 
     # baseline (add ps bump, broadcast across M)
-    C = streams["poisson"].poisson(clip01(0.2 + subj_bump)[:, None], size=(len(iid_order), M))
+    C = streams["poisson"].poisson(clip01(0.1 + subj_bump)[:, None], size=(len(iid_order), M))
     clinical_assoc_df_rows = [] # index of clinical vars that are associated (and their strength)
     for phenotypic_subgroup in phenotypic_subgroups['phenotypic_subgroup'].unique():
         # index of randomly chosen, associated clinical variables 

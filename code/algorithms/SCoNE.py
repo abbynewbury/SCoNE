@@ -39,25 +39,23 @@ def compute_jac(sample_matrix, X, X_hat, loss_type, for_W=False):
     else: assert True == False, f"{loss_type} not a valid loss type, should be one of 'kl_div', 'fro'"
     return GX
 
-def get_X_hat(W,H,Z,U,loss_type,norm):
+def get_X_hat(W,H,Z,U,loss_type):
     X_hat = W@H.T + Z@U.T
     if loss_type in ['kl_div','fro']:
         X_hat = np.clip(X_hat, 1e-9, np.inf) # clipping for log purposes
-        if norm:
-            X_hat = X_hat/(np.sum(X_hat))
     elif loss_type is None:
         X_hat = None
     else: assert True == False, f"{loss_type} not a valid loss type, should be one of 'kl_div', 'fro'"
     return X_hat
 
-def total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type, norm):
+def total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type):
     # define nec. elements
     if G_loss_type is not None:
-        G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type,norm)
+        G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
         G_loss = compute_loss(G,G_hat,loss_type=G_loss_type)
     else: G_loss = 0
     if C_loss_type is not None:
-        C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type,norm)
+        C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type)
         C_loss = compute_loss(C,C_hat,loss_type=C_loss_type)
     else: C_loss = 0
 
@@ -69,15 +67,15 @@ def total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C,
     return loss, lambda_Gloss*G_loss, C_loss, regularization
 
 
-def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type,norm):
+def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type):
     # Precompute terms independent of W
     def _forwardG(x):
         W = x.reshape(shape, order='F')
-        G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type,norm)
+        G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
         return G_hat
     def _forwardC(x):
         W = x.reshape(shape, order='F')
-        C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type,norm)
+        C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type)
         return C_hat
     def f(x):
         if G_loss_type is not None:
@@ -116,13 +114,13 @@ def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, 
 
     return f,g
 
-def make_fg_HG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type,norm):
+def make_fg_HG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type):
     # Precompute terms independent of H_G
-    C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type,norm)
+    C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type)
     C_loss = compute_loss(C,C_hat,C_loss_type)
     def _forward(x):
         H_G = x.reshape(shape, order='F')
-        G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type,norm) # could cut down on matrix multiplications if use precalculated Z@U_G.T for fun and jac
+        G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type) # could cut down on matrix multiplications if use precalculated Z@U_G.T for fun and jac
         return G_hat
     def f(x):
         G_hat = _forward(x)
@@ -138,13 +136,13 @@ def make_fg_HG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type,
 
     return f,g
 
-def make_fg_HC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type,norm):
+def make_fg_HC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type):
     # Precompute terms independent of H_C
-    G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type,norm)
+    G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
     G_loss = compute_loss(G,G_hat,G_loss_type)
     def _forward(x):
         H_C = x.reshape(shape, order='F')
-        C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type,norm)
+        C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type)
         return C_hat
     def f(x):
         C_hat = _forward(x)
@@ -160,13 +158,13 @@ def make_fg_HC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type,
 
     return f,g
 
-def make_fg_UG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type,norm):
+def make_fg_UG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type):
     # Precompute terms independent of U_G
-    C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type,norm)
+    C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type)
     C_loss = compute_loss(C,C_hat,C_loss_type)
     def _forward(x):
         U_G = x.reshape(shape, order='F')
-        G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type,norm)
+        G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
         return G_hat
     def f(x):
         G_hat = _forward(x)
@@ -182,13 +180,13 @@ def make_fg_UG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type,
 
     return f,g
 
-def make_fg_UC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type,norm):
+def make_fg_UC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type):
     # Precompute terms independent of U_C
-    G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type,norm)
+    G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
     G_loss = compute_loss(G,G_hat,G_loss_type)
     def _forward(x):
         U_C = x.reshape(shape, order='F')
-        C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type,norm)
+        C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type)
         return C_hat
     def f(x):
         C_hat = _forward(x)
@@ -283,7 +281,7 @@ def alternating_opt(
     inner_ftol=1e-5, # options for pgd_armijo (stopping criteria for ftol)
     max_outer=30,
     min_outer=5,
-    tol=1e-6, norm=False # normalize as advised by Yang et al. 
+    tol=1e-6
 ):
     '''
     To remove sparsity (CoNE) - set all lambda = 0
@@ -296,19 +294,19 @@ def alternating_opt(
         x0 = X.flatten(order='F') 
 
         if name == "W":
-            f,g = make_fg_W(W.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type, norm)
+            f,g = make_fg_W(W.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type)
             l1 = lambda_W
         elif name == "H_G":
-            f,g = make_fg_HG(H_G.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type, norm)
+            f,g = make_fg_HG(H_G.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type)
             l1 = lambda_H_G
         elif name == "H_C":
-            f,g = make_fg_HC(H_C.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type, norm)
+            f,g = make_fg_HC(H_C.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type)
             l1 = lambda_H_C
         elif name == "U_G":
-            f,g = make_fg_UG(U_G.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type, norm)
+            f,g = make_fg_UG(U_G.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type)
             l1 = 0
         elif name == "U_C":
-            f,g = make_fg_UC(U_C.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type, norm)
+            f,g = make_fg_UC(U_C.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type)
             l1 = 0
         else:
             raise ValueError(f"Unknown block {name}")
@@ -332,7 +330,7 @@ def alternating_opt(
 
         # initial objective
         loss_dict = defaultdict(list)
-        f_prev, G_loss, C_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type, norm)
+        f_prev, G_loss, C_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
 
         for _ in range(max_outer):
             W   = one_block_update("W", W)
@@ -343,7 +341,7 @@ def alternating_opt(
                 H_C = one_block_update("H_C", H_C)
                 U_C = one_block_update("U_C", U_C)
 
-            f_cur, G_loss, C_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type, norm)
+            f_cur, G_loss, C_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
             loss_dict['total_loss'].append(f_cur)
             loss_dict['G_loss'].append(G_loss)
             loss_dict['C_loss'].append(C_loss)
