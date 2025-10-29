@@ -21,6 +21,7 @@ def train_with_mlflow(
     ground_truth = None, # ground truth for input into eval function
     artifact_dir: str = "artifacts",
     nested=False,
+    confounding_matrix = None # for NMI with confounder/covariate matrix, rows here need to sum to 1
 ):
     """
     Wraps your algorithm function (defined in a .py file in algorithms folder) training loop with MLflow logging.
@@ -70,7 +71,7 @@ def train_with_mlflow(
 
         # 4) Evaluation
         if eval_fn:
-            val_metrics = eval_fn(factor_matrices=factor_matrices,ground_truth=ground_truth)
+            val_metrics = eval_fn(factor_matrices=factor_matrices,ground_truth=ground_truth,confounding_matrix=confounding_matrix)
             mlflow.log_metrics({k: v for k, v in val_metrics.items()})
 
         # 5) Log everything into final state as an artifact - for safe-keeping

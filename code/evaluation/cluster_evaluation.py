@@ -51,7 +51,7 @@ def normalized_mutual_info(true,pred):
 
     return nmi
             
-def compute_sim_metrics(factor_matrices,ground_truth):
+def compute_sim_metrics(factor_matrices,ground_truth,confounding_matrix=None):
     # factor matrices & ground truth should be dict with "W" as key
     W_true = ground_truth["W"]
     sum_to_1 = np.where(W_true.sum(axis=1) == 1)[0]
@@ -74,5 +74,11 @@ def compute_sim_metrics(factor_matrices,ground_truth):
 
     # calculate normalized mutual information
     results["nmi"] = normalized_mutual_info(W_true[sum_to_1,:],binary_W[sum_to_1,:]) # 0-1, want values closer to 1
+
+    if confounding_matrix is not None:
+        row_sums = np.sum(confounding_matrix, axis=1)
+        # Assert that all row sums are close to 1
+        assert np.allclose(row_sums, np.ones(confounding_matrix.shape[0]))
+        results["nmi_w_confounder"] = normalized_mutual_info(confounding_matrix,binary_W) # 0-1, want values closer to 1
 
     return results

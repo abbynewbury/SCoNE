@@ -54,8 +54,8 @@ np.random.seed(42)
 # PARAMETERS
 # generate all combinations of e and g_ps, c_ps variables
 e_list = [0.4,0.6,0.8,1]
-g_ps_list = [0,0.25] # TODO: change back to [0,0.25,0.75]
-c_ps_list = [0,0.1,0.2,0.3] # TODO: change back to [0,0.1,0.2,0.3,0.4,0.5,1]
+g_ps_list = [0] # TODO: change back to [0,0.25,0.75]
+c_ps_list = [0] # TODO: change back to [0,0.1,0.2,0.3,0.4,0.5,1]
 dataset_list = range(11) # 21 random datasets for each combination # TODO: change back to 21
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
@@ -68,7 +68,6 @@ loss_and_consistency_check = False
 
 # opt parameters
 max_outer = 100
-
 
 # read in Z
 Z_df = pd.read_csv(f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.Q',sep='\s+',header=None)
@@ -86,7 +85,6 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
                     max_outer,min_outer,tol,
                     sim_output_dir, exp_num,run_name,artifact_dir): 
     output_suffix = sim_functions.get_output_file_suffix(g_ps=g_ps, c_ps=c_ps, e=e, dataset=dataset)
-    print(f"{sim_output_dir}/simulation_metadata_{output_suffix}.pkl")
     C_path = f'{sim_output_dir}/C_{output_suffix}.npy'
     C = np.load(C_path)
     with open(f"{sim_output_dir}/simulation_metadata_{output_suffix}.pkl", "rb") as f:
@@ -101,9 +99,11 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
     fam_df_subset.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
     assert set(fam_df_subset['IID'].values).issubset(set(fam_df['IID'].values))
     # Note: first two columns are genetically-informed subgroups by construction
-    W_true = (simulation_metadata['phenotypic_subgroups'].pivot(index='IID',columns='phenotypic_subgroup',values='subgroup')
-            .reindex(simulation_metadata['iid_order']).iloc[:,:2].to_numpy().astype(int))
+    W_true = simulation_metadata['phenotypic_subgroups'].set_index('IID')[['subgroup0','subgroup1']].to_numpy('float64')
     ground_truth = {"W":W_true}
+    igsr_samples = sim_functions.read_in_igsr_samples(igsr_samples_filepath,bfile_path)
+    igsr_samples =  igsr_samples.set_index('IID').loc[simulation_metadata['iid_order']].reset_index()
+    confounding_matrix = pd.get_dummies(igsr_samples['Superpopulation code']).to_numpy('float64')
 
     if lambda_Gloss == 'ratio': # TODO: clean this up
         lambda_Gloss = C.sum()/G.sum()
@@ -127,7 +127,7 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
                 "max_inner":50, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4},
         eval_fn=cluster_evaluation.compute_sim_metrics, 
         ground_truth=ground_truth,
-        experiment_name=str(exp_num))
+        experiment_name=str(exp_num),confounding_matrix=confounding_matrix)
     elif run_name == 'MVBC':
         return  MLFlowWrapper.train_with_mlflow(algorithm_func=MVBCWrapper.MVBCWrapper,
         artifact_dir=artifact_dir,
@@ -139,7 +139,7 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
         "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C},
         eval_fn=cluster_evaluation.compute_sim_metrics, 
         ground_truth=ground_truth,
-        experiment_name=str(exp_num))
+        experiment_name=str(exp_num),confounding_matrix=confounding_matrix)
     elif run_name == 'RGWAS':
         Z_path = f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.Q'
         # save iid index
@@ -173,7 +173,7 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
         "run_name":run_name, "num_init":num_init},
         eval_fn=cluster_evaluation.compute_sim_metrics, 
         ground_truth=ground_truth,
-        experiment_name=str(exp_num))
+        experiment_name=str(exp_num),confounding_matrix=confounding_matrix)
 
     else: assert True == False, f"invalid run name {run_name}"
 

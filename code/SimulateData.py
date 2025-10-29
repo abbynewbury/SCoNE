@@ -3,7 +3,7 @@
 #SBATCH --nodes=1
 #SBATCH --mem=15G
 #SBATCH --cpus-per-task=4
-#SBATCH --time=120:00:00
+#SBATCH --time=30:00
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=anewbury@nygenome.org
 #SBATCH --output=SimulateDataoutput.txt
@@ -20,7 +20,7 @@ import sys
 from itertools import product
 from joblib import Parallel, delayed
 from functools import partial
-# TODO: change mem back to 30G and cpu back to 8
+# TODO: change mem back to 30G and cpu back to 8 and change time
 
 # DEFINE PATHS
 intermediate_plink_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/data/simulations/intermediate_plink'
@@ -44,10 +44,10 @@ generate_sim = True
 evaluate_sim = False 
 run_gwas = False  # only will run if run_gwas=True AND evaluate_sim=True 
 # generate all combinations for 5 scenarios
-g = 1 # 10 linked markers # TODO: scale back up
+g = 20 # 10 linked markers
 e_list = [0.4,0.6,0.8,1]
 g_ps_list = [0,0.25,0.75]
-c_ps_list = [0,0.1,0.2,0.3,0.4,0.5,1]
+c_ps_list = [0,0.1,0.2,0.3,0.4,0.5,1,2,10]
 dataset_list = range(11) # 21 random datasets for each combination # TODO: make 21
 combos = [(e, g_ps, c_ps, d) for e, g_ps in product(e_list, g_ps_list) for c_ps in ([0] if g_ps == 0 else c_ps_list) for d in dataset_list]
 # PARAMETERS
@@ -73,9 +73,9 @@ if generate_sim:
         intermediate_file_dir=intermediate_plink_dir,
         output_dir=output_dir,
         g=g,
-        M=10, # TODO: scale back up
-        num_clinical_assoc=1, # TODO: scale back up
-        num_markers=10 # TODO: scale back up
+        M=100, 
+        num_clinical_assoc=20, 
+        num_markers=100
     )
 
     results = Parallel(n_jobs=-1)(
