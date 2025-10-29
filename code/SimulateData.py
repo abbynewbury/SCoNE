@@ -44,7 +44,7 @@ generate_sim = True
 evaluate_sim = False 
 run_gwas = False  # only will run if run_gwas=True AND evaluate_sim=True 
 # generate all combinations for 5 scenarios
-g = 10 # 10 linked markers
+g = 1 # 10 linked markers # TODO: scale back up
 e_list = [0.4,0.6,0.8,1]
 g_ps_list = [0,0.25,0.75]
 c_ps_list = [0,0.1,0.2,0.3,0.4,0.5,1]
@@ -73,9 +73,9 @@ if generate_sim:
         intermediate_file_dir=intermediate_plink_dir,
         output_dir=output_dir,
         g=g,
-        M=100,
-        num_clinical_assoc=10,
-        num_markers=100
+        M=10, # TODO: scale back up
+        num_clinical_assoc=1, # TODO: scale back up
+        num_markers=10 # TODO: scale back up
     )
 
     results = Parallel(n_jobs=-1)(

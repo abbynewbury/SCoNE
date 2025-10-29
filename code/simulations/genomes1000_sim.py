@@ -189,7 +189,7 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
         for genetic_subgroup in range(2):
             markers_assoc = streams["markers"].choice(marker_pool,size=g, replace=False).tolist()
             markers_assoc_dict[genetic_subgroup] = markers_assoc
-    
+
     # 2. Generate genetic subgroups
     genetic_subgroups = []
     for genetic_subgroup in range(2):
@@ -221,16 +221,11 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
         assert len(geno_cols) == g
         #raw[geno_cols] = (raw[geno_cols] > 0).astype(int) # recode s.t. values 1 and 2 map to 1 - keep columns in 0/1/2
         genetic_subgroup_df = raw.set_index('IID')[geno_cols].sum(axis=1).reset_index(name=f'r')
-        genetic_subgroup_df['genetic_subgroup'] = genetic_subgroup
-        genetic_subgroup_df[f'subgroup'] = genetic_subgroup_df['r'] > genetic_subgroup_df['r'].quantile(0.8)
-        genetic_subgroups.append(genetic_subgroup_df)
-    genetic_subgroups = pd.concat(genetic_subgroups)
+        genetic_subgroup_df[f'subgroup{genetic_subgroup}'] = (genetic_subgroup_df['r'] > genetic_subgroup_df['r'].quantile(0.8)).astype(int)
+        genetic_subgroups.append(genetic_subgroup_df[['IID',f'subgroup{genetic_subgroup}']])
+    genetic_subgroups = genetic_subgroups[0].merge(genetic_subgroups[1],on='IID') 
     # remove overlapping samples in genetic subgroups 0 and 1
-    mask = genetic_subgroups['subgroup'] & genetic_subgroups['genetic_subgroup'].isin([0, 1])
-    overlap_iids = (genetic_subgroups.loc[mask]
-                  .groupby('IID')['genetic_subgroup']
-                  .nunique()
-                  .pipe(lambda s: s[s > 1]).index)
+    overlap_iids = genetic_subgroups[(genetic_subgroups['subgroup0']==1)&(genetic_subgroups['subgroup1']==1)]['IID'].unique()
     genetic_subgroups = genetic_subgroups[~genetic_subgroups['IID'].isin(overlap_iids)].copy()
 
 
@@ -238,39 +233,34 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
     fam_df = pd.read_csv(f'{intermediate_file_dir}/subset_markers_g{genetic_subgroup}_{intermediate_file_suffix}.fam',sep='\s+',header=None)
     fam_df.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
     iid_order = [i for i in fam_df['IID'].values if i not in overlap_iids]
+    genetic_subgroups = genetic_subgroups.set_index('IID').loc[iid_order].reset_index() # make sure correct iid order
     gi_phenotypic_subgroups = []
     for phenotypic_subgroup in range(2): 
-        g = genetic_subgroups[genetic_subgroups['genetic_subgroup']==phenotypic_subgroup]['subgroup'].astype(int)
+        g = genetic_subgroups[f'subgroup{phenotypic_subgroup}'].astype(int)
         g_standardized = (g - g.mean())/g.std()
         noise = streams["env_noise"].normal(loc=0,scale=1,size=len(g))
         latent = e*g_standardized + np.sqrt(1-e**2)*noise
         subgroup = (latent > np.quantile(latent, 0.8)).astype(int)
-        phenotypic_subgroup_df = pd.DataFrame({'IID':genetic_subgroups[genetic_subgroups['genetic_subgroup']==phenotypic_subgroup]['IID']})
-        phenotypic_subgroup_df['subgroup'] = subgroup.astype(bool)
-        phenotypic_subgroup_df['phenotypic_subgroup'] = phenotypic_subgroup
+        phenotypic_subgroup_df = pd.DataFrame({'IID':iid_order})
+        phenotypic_subgroup_df[f'subgroup{phenotypic_subgroup}'] = subgroup
         gi_phenotypic_subgroups.append(phenotypic_subgroup_df)
-    gi_phenotypic_subgroups = pd.concat(gi_phenotypic_subgroups)
+    gi_phenotypic_subgroups = gi_phenotypic_subgroups[0].merge(gi_phenotypic_subgroups[1],on='IID') 
     # remove overlapping samples in phenotypic subgroups 0 and 1
-    mask = gi_phenotypic_subgroups['subgroup']
-    overlap_iids = (gi_phenotypic_subgroups.loc[mask]
-                  .groupby('IID')['phenotypic_subgroup']
-                  .nunique()
-                  .pipe(lambda s: s[s > 1]).index)
-    gi_phenotypic_subgroups = gi_phenotypic_subgroups[~gi_phenotypic_subgroups['IID'].isin(overlap_iids)].copy()
-    extra_subgroups_size = max(gi_phenotypic_subgroups[gi_phenotypic_subgroups['subgroup']]['phenotypic_subgroup'].value_counts()) # is max of pheno subgroup 0 or 1 
-    # remove overlap samples from genetic subgroups and iid order as well
-    genetic_subgroups = genetic_subgroups[~genetic_subgroups['IID'].isin(overlap_iids)].copy()
-    iid_order = [i for i in iid_order if i not in overlap_iids]
+    overlap_iids = gi_phenotypic_subgroups[(gi_phenotypic_subgroups['subgroup0']==1) & (gi_phenotypic_subgroups['subgroup1']==1)]['IID'].unique()
+    iid_order = [i for i in iid_order if i not in overlap_iids] # remove overlap samples from genetic subgroups and iid order as well
+    gi_phenotypic_subgroups =  gi_phenotypic_subgroups.set_index('IID').loc[iid_order].reset_index()
+    genetic_subgroups = genetic_subgroups.set_index('IID').loc[iid_order].reset_index()
+    extra_subgroups_size = gi_phenotypic_subgroups[['subgroup0','subgroup1']].sum().max()
+
     non_gi_phenotypic_subgroups = []
     for phenotypic_subgroup in range(2,4): 
         # randomly select extra_subgroups_size people
         randomly_selected = pd.Series(iid_order).sample(extra_subgroups_size,random_state=rs(streams,"extra_sub")).values.tolist() 
         phenotypic_subgroup_df = pd.DataFrame(iid_order,columns=['IID'])
-        phenotypic_subgroup_df['phenotypic_subgroup'] = phenotypic_subgroup
-        phenotypic_subgroup_df['subgroup'] = phenotypic_subgroup_df['IID'].isin(randomly_selected)
+        phenotypic_subgroup_df[f'subgroup{phenotypic_subgroup}'] = phenotypic_subgroup_df['IID'].isin(randomly_selected).astype(int)
         non_gi_phenotypic_subgroups.append(phenotypic_subgroup_df)
-    non_gi_phenotypic_subgroups = pd.concat(non_gi_phenotypic_subgroups)
-    phenotypic_subgroups = pd.concat([gi_phenotypic_subgroups,non_gi_phenotypic_subgroups])
+    non_gi_phenotypic_subgroups = non_gi_phenotypic_subgroups[0].merge(non_gi_phenotypic_subgroups[1],on='IID') 
+    phenotypic_subgroups = gi_phenotypic_subgroups.merge(non_gi_phenotypic_subgroups,on='IID')
 
     # extract all markers & correct individuals for final G
     assert len(set(marker_pool)) == num_markers
@@ -295,39 +285,18 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
 
     # 4. simulate M clinical features
     # start with baseline probabilities
-    superpops = sorted(igsr_samples['Superpopulation code'].unique())  # stable order
-    r = np.arange(len(superpops), dtype=float)
-    r = (r - r.mean()) / r.std() # mean 0, sd1
-    sp2bump = dict(zip(superpops, c_ps * r))
-    subj_bump = (igsr_samples
-                .set_index('IID')['Superpopulation code']
-                .reindex(iid_order).map(sp2bump).to_numpy())  # shape (n,)
-
-    clip01 = lambda x: np.clip(x, 0.1, None) # lowest rate is .1
-
-    # baseline (add ps bump, broadcast across M)
-    C = streams["poisson"].poisson(clip01(0.1 + subj_bump)[:, None], size=(len(iid_order), M))
-    clinical_assoc_df_rows = [] # index of clinical vars that are associated (and their strength)
-    for phenotypic_subgroup in phenotypic_subgroups['phenotypic_subgroup'].unique():
-        # index of randomly chosen, associated clinical variables 
-        assoc_idx = streams["assoc"].choice(M, size=num_clinical_assoc, replace=False)  
-        n1 = num_clinical_assoc // 3 # 1/3 
-        n2 = 2 * num_clinical_assoc // 3 # 1/3 
-        # get those who are in the subgroup
-        mask = ((phenotypic_subgroups["phenotypic_subgroup"] == phenotypic_subgroup) & (phenotypic_subgroups["subgroup"]))
-        subj_ids = phenotypic_subgroups.loc[mask, "IID"].unique()
-        # map subject IDs to row indices 
-        row_idx = [i for i, iid in enumerate(iid_order) if iid in subj_ids]
-        b = subj_bump[row_idx][:, None]
-        C[np.ix_(row_idx, assoc_idx[:n1])] = streams["poisson"].poisson(clip01(0.6+b), size=(len(row_idx), n1))
-        C[np.ix_(row_idx, assoc_idx[n1:n2])] = streams["poisson"].poisson(clip01(0.5+b), size=(len(row_idx), n2-n1))
-        C[np.ix_(row_idx, assoc_idx[n2:])] = streams["poisson"].poisson(clip01(0.4+b), size=(len(row_idx), len(assoc_idx)-n2))
-        clinical_assoc_df_rows += [
-        {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.6, "indices": assoc_idx[:n1]},
-        {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.5, "indices": assoc_idx[n1:n2]},
-        {"phenotypic_subgroup": phenotypic_subgroup, "strength": 0.4, "indices": assoc_idx[n2:]},
-        ]
-    clinical_assoc_df = pd.DataFrame(clinical_assoc_df_rows)
+    igsr_samples =  igsr_samples.set_index('IID').loc[iid_order].reset_index()
+    Z = pd.get_dummies(igsr_samples['Superpopulation code']).to_numpy('float64')
+    W = phenotypic_subgroups.set_index('IID').to_numpy('float64')
+    # generate superpop shift for each feature
+    U_C = streams["ps_noise"].gamma(shape=1.0, scale=1.0, size=(M, Z.shape[1]))  
+    # pick num_clinical_assoc linked features for each subgroup
+    H_C = np.zeros((M,4), int)
+    for j in range(4):
+        idx = streams["assoc"].choice(M, size=num_clinical_assoc, replace=False)
+        H_C[idx, j] = 1
+    C = streams["poisson"].poisson(np.exp(0.1 + W@H_C.T + (c_ps)*Z@U_C.T))
+    clinical_assoc_df = pd.DataFrame(pd.DataFrame(H_C))
 
     # write C
     np.save(f"{output_dir}/C_{output_file_suffix}.npy", C)
