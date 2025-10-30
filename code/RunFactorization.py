@@ -53,10 +53,10 @@ np.random.seed(42)
 
 # PARAMETERS
 # generate all combinations of e and g_ps, c_ps variables
-e_list = [0.4,0.6,0.8,1]
-g_ps_list = [0,0.25,0.75]
-c_ps_list = [0,0.1,0.2,0.3,0.4,0.5,1,2,10]
-dataset_list = range(11) # 21 random datasets for each combination # TODO: change back to 21
+e_list = [1] # TODO: change to [0.4,0.6,0.8,1]
+g_ps_list = [0.25] # TODO: change to 0.75
+c_ps_list = [3,3.5,4] # TODO: change to [0,0.1,0.2,0.3,0.4,0.5,1,2,10]
+dataset_list = range(21) # 21 random datasets for each combination
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
 rank = 3
@@ -72,7 +72,6 @@ max_outer = 100
 # read in Z
 Z_df = pd.read_csv(f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.Q',sep='\s+',header=None)
 Z = Z_df[range(5)].to_numpy() 
-time.sleep(30*60)
 
 def _call_kwargs(kw):
     return run_one_wrapper(**kw)  # expands kwargs dict
@@ -108,8 +107,8 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
         lambda_Gloss = C.sum()/G.sum()
 
     if run_name in ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','CoNE(Fro)']:
-        G = G/G.sum()
-        C = C/C.sum()
+        # G = G/G.sum()
+        # C = C/C.sum()
         return MLFlowWrapper.train_with_mlflow( 
         algorithm_func=SCoNE.alternating_opt,
         artifact_dir=artifact_dir,
@@ -179,6 +178,7 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
 os.makedirs(artifact_dir, exist_ok=True)
 os.makedirs(f"{os.path.dirname(artifact_dir)}/slurm_logs", exist_ok=True)
 os.makedirs(f"{os.path.dirname(artifact_dir)}/logs_tuning", exist_ok=True)
+os.makedirs(f"{os.path.dirname(artifact_dir)}/logs_no_norm", exist_ok=True)
 os.makedirs(f"{os.path.dirname(artifact_dir)}/logs_loss_consistency", exist_ok=True)
 
 # PRELIMINARY: set up fixed params across experiments
@@ -211,7 +211,7 @@ testing_runs = ['C-NMF','C-CoNE','HNMF','CoNE','G-NMF'] # TODO: change back to [
 
 # STEP 1: hparam tuning with 1 randomly selected dataset per experiment (and then remove it from testing)
 if tuning:
-    combos = [(g_ps, c_ps, e, lW, lHG, lHC, rn) for e, g_ps in product(e_list, g_ps_list) for c_ps in ([0] if g_ps == 0 else [i for i in c_ps_list if i!=0]) for (lW, lHG, lHC, rn) in product([0,1e-2,.1],[0,1e-2,.1],[0,1e-2,.1], tuning_runs)]
+    combos = [(g_ps, c_ps, e, lW, lHG, lHC, rn) for e, g_ps in product(e_list, g_ps_list) for c_ps in ([0] if g_ps == 0 else c_ps_list) for (lW, lHG, lHC, rn) in product([0,1e-2,.1],[0,1e-2,.1],[0,1e-2,.1], tuning_runs)]
     cfgs = [
         dict(
             g_ps=g_ps, c_ps=c_ps, e=e, dataset=tuning_dataset[g_ps,c_ps, e],
@@ -260,7 +260,7 @@ if testing:
     # build combos excluding the tuning dataset 
     combos = []
     for (g_ps,e) in product(g_ps_list, e_list):
-        for c_ps in ([0] if g_ps == 0 else [i for i in c_ps_list if i!=0]):
+        for c_ps in ([0] if g_ps == 0 else c_ps_list):
             tune_idx = tuning_dataset[g_ps, c_ps, e]
             other_idx = [i for i in dataset_list if i != tune_idx]
             for run_name in testing_runs:
@@ -286,7 +286,7 @@ if testing:
         )
         for i, (g_ps, c_ps, e, lambda_W, lambda_H_G, lambda_H_C, run_name, idx) in enumerate(combos)
     ]
-    mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/logs")
+    mlflow.set_tracking_uri("file:" + f"{os.path.dirname(artifact_dir)}/logs") 
     for i in exp_map.values():
         exp = mlflow.set_experiment(str(i)) # set experiment id ahead of time for slurm parallelism
     jobs = executor.map_array(_call_kwargs, cfgs)

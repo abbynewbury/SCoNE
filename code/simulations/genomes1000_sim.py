@@ -168,6 +168,7 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
 
         # select marker pool (num_markers markers where half are in right af_var_quartile and half are from null pool)
         marker_pool = maf_by_superpop[maf_by_superpop["null_pool"]].sample(n=num_markers//2, replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist()
+        linked_snp_pool = marker_pool.copy()
         marker_pool.extend(maf_by_superpop[(maf_by_superpop['af_var_quartile']==g_ps)&(~maf_by_superpop['SNP'].isin(marker_pool))] 
                         .sample(n=num_markers//2, replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist()) # & half from correct pool 
 
@@ -180,12 +181,13 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
                 f.write(iid + "\t" + iid + "\n")
         keep_samples = f'--keep {intermediate_file_dir}/eursamples_{intermediate_file_suffix}.txt'
 
-        # select marker pool (where EUR MAF>5%)
+        # select marker pool (where EUR MAF>5%) and pool from which to draw linked snps
         marker_pool = maf_by_superpop[maf_by_superpop['EUR']>=0.05].sample(n=num_markers, replace=False, random_state=rs(streams,"markers"))['SNP'].values.tolist() 
+        linked_snp_pool = marker_pool.copy()
 
     # select markers
     for genetic_subgroup in range(2):
-        markers_assoc_df.append(pd.DataFrame({'genetic subgroup':genetic_subgroup, 'SNP': streams["markers"].choice(marker_pool,size=g, replace=False).tolist(),
+        markers_assoc_df.append(pd.DataFrame({'genetic subgroup':genetic_subgroup, 'SNP': streams["markers"].choice(linked_snp_pool,size=g, replace=False).tolist(),
                                         'beta':np.clip(streams['marker_weights'].normal(0.6, 0.1, g), 0, None)}))
     markers_assoc_df = pd.concat(markers_assoc_df)
 

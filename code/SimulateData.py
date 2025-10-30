@@ -44,11 +44,11 @@ generate_sim = True
 evaluate_sim = False 
 run_gwas = False  # only will run if run_gwas=True AND evaluate_sim=True 
 # generate all combinations for 5 scenarios
-g = 20 # 10 linked markers
+g = 30 # 30 linked markers each
 e_list = [0.4,0.6,0.8,1]
 g_ps_list = [0,0.25,0.75]
-c_ps_list = [0,0.1,0.2,0.3,0.4,0.5,1,2,10]
-dataset_list = range(11) # 21 random datasets for each combination # TODO: make 21
+c_ps_list = [0,0.1,0.5,1,2,3,3.5,4,10] 
+dataset_list = range(21) # 21 random datasets for each combination 
 combos = [(e, g_ps, c_ps, d) for e, g_ps in product(e_list, g_ps_list) for c_ps in ([0] if g_ps == 0 else c_ps_list) for d in dataset_list]
 # PARAMETERS
 
