@@ -294,7 +294,9 @@ def sun_generate_sim_data(bfile_path, maf_by_superpop_filepath,igsr_samples_file
     for j in range(4):
         idx = streams["assoc"].choice(M, size=num_clinical_assoc, replace=False)
         H_C[idx, j] = np.clip(streams["clinical_weights"].normal(loc=0.6, scale=0.1, size=len(idx)), 0, None)
-    C = streams["poisson"].poisson(np.exp(0.1 + W@H_C.T + (c_ps)*Z@U_C.T))
+    shared_factors = streams['env_noise'].normal(size=(len(iid_order), 3))  # 3 correlated latent sources
+    A = streams['env_noise'].normal(scale=0.1, size=(3, M))                 # loading matrix
+    C = streams["poisson"].poisson(np.exp(0.1 + W@H_C.T + (c_ps)*Z@U_C.T + shared_factors@A + + streams["env_noise"].normal(0, 0.2, size=(len(iid_order), M))))
     clinical_assoc_df = pd.DataFrame(pd.DataFrame(H_C))
 
     # write C

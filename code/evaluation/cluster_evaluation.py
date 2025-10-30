@@ -75,7 +75,7 @@ def compute_sim_metrics(factor_matrices,ground_truth,confounding_matrix=None):
     # calculate normalized mutual information
     results["nmi"] = normalized_mutual_info(W_true[sum_to_1,:],binary_W[sum_to_1,:]) # 0-1, want values closer to 1
 
-    if confounding_matrix is not None:
+    if confounding_matrix is not None and confounding_matrix.shape[1]!=1:
         row_sums = np.sum(confounding_matrix, axis=1)
         # Assert that all row sums are close to 1
         assert np.allclose(row_sums, np.ones(confounding_matrix.shape[0]))

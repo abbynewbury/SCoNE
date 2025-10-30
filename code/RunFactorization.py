@@ -3,7 +3,7 @@
 #SBATCH --nodes=1
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=1
-#SBATCH --time=120:00:00
+#SBATCH --time=30:00
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=anewbury@nygenome.org
 #SBATCH --output=RunFactorization.txt
@@ -54,8 +54,8 @@ np.random.seed(42)
 # PARAMETERS
 # generate all combinations of e and g_ps, c_ps variables
 e_list = [0.4,0.6,0.8,1]
-g_ps_list = [0] # TODO: change back to [0,0.25,0.75]
-c_ps_list = [0] # TODO: change back to [0,0.1,0.2,0.3,0.4,0.5,1]
+g_ps_list = [0,0.25,0.75]
+c_ps_list = [0,0.1,0.2,0.3,0.4,0.5,1,2,10]
 dataset_list = range(11) # 21 random datasets for each combination # TODO: change back to 21
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
@@ -72,8 +72,7 @@ max_outer = 100
 # read in Z
 Z_df = pd.read_csv(f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.Q',sep='\s+',header=None)
 Z = Z_df[range(5)].to_numpy() 
-
-
+time.sleep(30*60)
 
 def _call_kwargs(kw):
     return run_one_wrapper(**kw)  # expands kwargs dict
@@ -207,7 +206,7 @@ executor.update_parameters(
     },
 )
 tuning_runs = ['SCoNE','SCoNE(Fro)','sHNMF','MVBC']  # all of these runs have sparsity parameters that need to be tuned 
-testing_runs = ['C-NMF','C-CoNE','HNMF','CoNE'] # TODO: change back to ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','RGWAS','MVBC']
+testing_runs = ['C-NMF','C-CoNE','HNMF','CoNE','G-NMF'] # TODO: change back to ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','RGWAS','MVBC']
 # PRELIMINARY: set up fixed params across experiments
 
 # STEP 1: hparam tuning with 1 randomly selected dataset per experiment (and then remove it from testing)
