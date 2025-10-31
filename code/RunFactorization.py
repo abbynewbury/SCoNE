@@ -53,10 +53,10 @@ np.random.seed(42)
 
 # PARAMETERS
 # generate all combinations of e and g_ps, c_ps variables
-e_list = [1] # TODO: change to [0.4,0.6,0.8,1]
-g_ps_list = [0.25] # TODO: change to 0.75
-c_ps_list = [3,3.5,4] # TODO: change to [0,0.1,0.2,0.3,0.4,0.5,1,2,10]
-dataset_list = range(21) # 21 random datasets for each combination
+e_list = [0.4,1] # TODO: change to [0.4,0.6,0.8,1]
+g_ps_list = [0,0.25] # TODO: change to 0.75
+c_ps_list = [0,0.1,1] # TODO: change to [0,0.1,0.2,0.3,0.4,0.5,1,2,10]
+dataset_list = range(11) # 21 random datasets for each combination
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
 rank = 3
@@ -93,9 +93,9 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
     # read in G with num_markers
     G_path = f'{sim_output_dir}/G_{output_suffix}.raw'
     G = np.loadtxt(G_path,  usecols=range(6, num_markers+6), dtype=np.int64, skiprows=1)
-    fam_df_subset = pd.read_csv(f'{sim_output_dir}/G_{output_suffix}.fam',sep='\s+',header=None)
-    fam_df_subset.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
-    assert set(fam_df_subset['IID'].values).issubset(set(fam_df['IID'].values))
+    # fam_df_subset = pd.read_csv(f'{sim_output_dir}/G_{output_suffix}.fam',sep='\s+',header=None)
+    # fam_df_subset.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
+    # assert set(fam_df_subset['IID'].values).issubset(set(fam_df['IID'].values))
     # Note: first two columns are genetically-informed subgroups by construction
     W_true = simulation_metadata['phenotypic_subgroups'].set_index('IID')[['subgroup0','subgroup1']].to_numpy('float64')
     ground_truth = {"W":W_true}
@@ -184,7 +184,7 @@ os.makedirs(f"{os.path.dirname(artifact_dir)}/logs_loss_consistency", exist_ok=T
 # PRELIMINARY: set up fixed params across experiments
 exp_map = {}
 tuning_dataset = {}
-for i, (g_ps,c_ps,e) in enumerate([(g_ps, c_ps, e) for e, g_ps in product(e_list, g_ps_list) for c_ps in ([0] if g_ps == 0 else c_ps_list)]):
+for i, (g_ps,c_ps,e) in enumerate([(g_ps, c_ps, e) for e, g_ps,c_ps in product(e_list, g_ps_list,c_ps_list)]):
     key = (g_ps,c_ps, e)
     tuning_dataset[key] = np.random.randint(0, len(dataset_list))
     exp_map[key] = i
@@ -206,7 +206,7 @@ executor.update_parameters(
     },
 )
 tuning_runs = ['SCoNE','SCoNE(Fro)','sHNMF','MVBC']  # all of these runs have sparsity parameters that need to be tuned 
-testing_runs = ['C-NMF','C-CoNE','HNMF','CoNE','G-NMF'] # TODO: change back to ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','RGWAS','MVBC']
+testing_runs = ['G-NMF'] # TODO: change back to ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','RGWAS','MVBC']
 # PRELIMINARY: set up fixed params across experiments
 
 # STEP 1: hparam tuning with 1 randomly selected dataset per experiment (and then remove it from testing)
@@ -259,19 +259,18 @@ if testing:
     # submit as a SLURM array (adjust params as needed)
     # build combos excluding the tuning dataset 
     combos = []
-    for (g_ps,e) in product(g_ps_list, e_list):
-        for c_ps in ([0] if g_ps == 0 else c_ps_list):
-            tune_idx = tuning_dataset[g_ps, c_ps, e]
-            other_idx = [i for i in dataset_list if i != tune_idx]
-            for run_name in testing_runs:
-                if run_name in tuning_runs:
-                    matching_best_run = best[(best['run_name']==run_name)&(best['g_ps']==g_ps)&(best['c_ps']==c_ps)&(best['e']==e)].copy()
-                    assert matching_best_run.shape[0] == 1
-                    lambda_W, lambda_H_G, lambda_H_C = matching_best_run[['lambda_W','lambda_H_G','lambda_H_C']].values[0].tolist()
-                else:
-                    lambda_W, lambda_H_G, lambda_H_C = (0,0,0)
-                for idx in other_idx: # get 10 random initalizations of each
-                    combos.append((g_ps, c_ps, e, lambda_W, lambda_H_G, lambda_H_C, run_name, idx))
+    for (g_ps,e,c_ps) in product(g_ps_list, e_list,c_ps_list):
+        tune_idx = tuning_dataset[g_ps, c_ps, e]
+        other_idx = [i for i in dataset_list if i != tune_idx]
+        for run_name in testing_runs:
+            if run_name in tuning_runs:
+                matching_best_run = best[(best['run_name']==run_name)&(best['g_ps']==g_ps)&(best['c_ps']==c_ps)&(best['e']==e)].copy()
+                assert matching_best_run.shape[0] == 1
+                lambda_W, lambda_H_G, lambda_H_C = matching_best_run[['lambda_W','lambda_H_G','lambda_H_C']].values[0].tolist()
+            else:
+                lambda_W, lambda_H_G, lambda_H_C = (0,0,0)
+            for idx in other_idx: # get 10 random initalizations of each
+                combos.append((g_ps, c_ps, e, lambda_W, lambda_H_G, lambda_H_C, run_name, idx))
     cfgs = [
         dict(
             g_ps=g_ps, c_ps=c_ps, e=e, dataset=idx,
