@@ -54,7 +54,6 @@ def normalized_mutual_info(true,pred):
 def compute_sim_metrics(factor_matrices,ground_truth,confounding_matrix=None):
     # factor matrices & ground truth should be dict with "W" as key
     W_true = ground_truth["W"]
-    sum_to_1 = np.where(W_true.sum(axis=1) == 1)[0]
     W = factor_matrices["W"]
 
     # create hard clusters
@@ -62,18 +61,18 @@ def compute_sim_metrics(factor_matrices,ground_truth,confounding_matrix=None):
     binary_W = np.zeros_like(W)
     binary_W[np.arange(W.shape[0]), labels] = 1
 
-    assert np.all(W_true[sum_to_1,:].sum(axis=1) == 1), "true has rows that are not one-hot"
-    assert np.all(binary_W[sum_to_1,:].sum(axis=1) == 1), "pred has rows that are not one-hot"
+    assert np.all(W_true.sum(axis=1) == 1), "true has rows that are not one-hot"
+    assert np.all(binary_W.sum(axis=1) == 1), "pred has rows that are not one-hot"
 
     results = {}
     # calculate purity
-    results["purity"] = purity(W_true[sum_to_1,:], binary_W[sum_to_1,:]) # 0-1, want values closer to 1
+    results["purity"] = purity(W_true, binary_W) # 0-1, want values closer to 1
 
     # calculate normalized conditional entropy
-    results["norm_cond_entropy"] = norm_cond_entropy(W_true[sum_to_1,:],binary_W[sum_to_1,:]) # 0-1, want values closer to 0
+    results["norm_cond_entropy"] = norm_cond_entropy(W_true,binary_W) # 0-1, want values closer to 0
 
     # calculate normalized mutual information
-    results["nmi"] = normalized_mutual_info(W_true[sum_to_1,:],binary_W[sum_to_1,:]) # 0-1, want values closer to 1
+    results["nmi"] = normalized_mutual_info(W_true,binary_W) # 0-1, want values closer to 1
 
     if confounding_matrix is not None and confounding_matrix.shape[1]!=1:
         row_sums = np.sum(confounding_matrix, axis=1)

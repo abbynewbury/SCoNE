@@ -53,14 +53,13 @@ np.random.seed(42)
 
 # PARAMETERS
 # generate all combinations of e and g_ps, c_ps variables
-e_list = [0.4,1] # TODO: change to [0.4,0.6,0.8,1]
-g_ps_list = [0,0.25] # TODO: change to 0.75
-c_ps_list = [0,0.1,1] # TODO: change to [0,0.1,0.2,0.3,0.4,0.5,1,2,10]
+e_list = [0.6,0.8,1] # TODO [0.4,0.6,0.8,1]
+g_ps_list = [0,0.25] # TODO [0,0.25,0.75]
+c_ps_list = [0,0.1,1] # TODO [0,0.1,0.5,1,2,3,3.5,4,10] 
 dataset_list = range(11) # 21 random datasets for each combination
 bfile_path=f'{sim_output_dir}/G'
 af_df_filepath=admixture_filepath
 rank = 3
-num_markers = 100
 tuning = False # to run sparsity tuning step
 testing = True # to run testing step
 loss_and_consistency_check = False
@@ -70,14 +69,16 @@ loss_and_consistency_check = False
 max_outer = 100
 
 # read in Z
-Z_df = pd.read_csv(f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.Q',sep='\s+',header=None)
-Z = Z_df[range(5)].to_numpy() 
+Z = pd.read_csv(f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.Q',sep='\s+',header=None)
+fam_df = pd.read_csv(f'{bfile_path}_SNP.fam',sep='\s+',header=None) 
+fam_df.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
+Z.index = fam_df['IID']
 
 def _call_kwargs(kw):
     return run_one_wrapper(**kw)  # expands kwargs dict
 
 def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
-                    Z,rank,num_markers,
+                    Z,rank,
                     lambda_W, lambda_H_G, lambda_H_C,lambda_Gloss,
                     G_loss_type, C_loss_type,
                     max_outer,min_outer,tol,
@@ -87,19 +88,13 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
     C = np.load(C_path)
     with open(f"{sim_output_dir}/simulation_metadata_{output_suffix}.pkl", "rb") as f:
         simulation_metadata = pickle.load(f)
-    fam_df = pd.read_csv(f'{bfile_path}.fam',sep='\s+',header=None) 
-    fam_df.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
-    iid_index = fam_df[fam_df['IID'].isin(simulation_metadata['iid_order'])].index # some samples removed due to overlap btwn subgroups, need correct length
-    # read in G with num_markers
-    G_path = f'{sim_output_dir}/G_{output_suffix}.raw'
-    G = np.loadtxt(G_path,  usecols=range(6, num_markers+6), dtype=np.int64, skiprows=1)
-    # fam_df_subset = pd.read_csv(f'{sim_output_dir}/G_{output_suffix}.fam',sep='\s+',header=None)
-    # fam_df_subset.columns = ['FID','IID'] + fam_df.columns[2:].tolist()
-    # assert set(fam_df_subset['IID'].values).issubset(set(fam_df['IID'].values))
-    # Note: first two columns are genetically-informed subgroups by construction
-    W_true = simulation_metadata['phenotypic_subgroups'].set_index('IID')[['subgroup0','subgroup1']].to_numpy('float64')
+    iid_order = simulation_metadata['iid_order']
+    Z_npy = Z.loc[iid_order][range(5)].to_numpy() 
+    G_path = f'{sim_output_dir}/G_{output_suffix}'
+    G = pd.read_csv(G_path,index_col=0).to_numpy('float64')
+    W_true = simulation_metadata['genetic_subgroups'].pivot(columns='subgroup',values='in_subgroup').to_numpy('float64')
     ground_truth = {"W":W_true}
-    igsr_samples = sim_functions.read_in_igsr_samples(igsr_samples_filepath,bfile_path)
+    igsr_samples = sim_functions.read_in_igsr_samples(igsr_samples_filepath,iid_order)
     igsr_samples =  igsr_samples.set_index('IID').loc[simulation_metadata['iid_order']].reset_index()
     confounding_matrix = pd.get_dummies(igsr_samples['Superpopulation code']).to_numpy('float64')
 
@@ -107,13 +102,11 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
         lambda_Gloss = C.sum()/G.sum()
 
     if run_name in ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','CoNE(Fro)']:
-        # G = G/G.sum()
-        # C = C/C.sum()
         return MLFlowWrapper.train_with_mlflow( 
         algorithm_func=SCoNE.alternating_opt,
         artifact_dir=artifact_dir,
         run_name=run_name,
-        algorithm_func_kwargs={"G":G, "C":C, "Z":Z[iid_index,:],"rank":rank, "num_init":num_init,
+        algorithm_func_kwargs={"G":G, "C":C, "Z":Z_npy,"rank":rank, "num_init":num_init,
                                "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C,"lambda_Gloss":lambda_Gloss,
                                 "max_inner":50, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4,
                                "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
@@ -143,24 +136,24 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
         # save iid index
         iid_index_path = f'{sim_output_dir}/iid_index_{output_suffix}.npy'
         np.save(iid_index_path,iid_index.to_numpy())
-        if len(iid_index)<500: # need to subset to only linked features 
-            clinical_assoc = list(set([x for sub in simulation_metadata['clinical_assoc']['indices'].values.tolist() for x in sub]))
-            C_subset = C[:,clinical_assoc] 
-            np.save(f'{sim_output_dir}/C_subset_{output_suffix}.npy', C_subset)
-            C_path= f'{sim_output_dir}/C_subset_{output_suffix}.npy'
+        # if len(iid_index)<500: # need to subset to only linked features 
+        #     clinical_assoc = list(set([x for sub in simulation_metadata['clinical_assoc']['indices'].values.tolist() for x in sub]))
+        #     C_subset = C[:,clinical_assoc] 
+        #     np.save(f'{sim_output_dir}/C_subset_{output_suffix}.npy', C_subset)
+        #     C_path= f'{sim_output_dir}/C_subset_{output_suffix}.npy'
 
-            markers_assoc = list(set([x for sub in simulation_metadata['markers_assoc'].values() for x in sub]))
-            with open(f'{sim_output_dir}/markers_assoc_G_subset_{output_suffix}.txt','w') as f:
-                for snp in markers_assoc:
-                    f.write(snp + "\n")
-            plink_extract = f'''
-                module load plink/1.9 && plink --bfile {sim_output_dir}/G_{output_suffix} \
-                    --recode A \
-                    --extract {sim_output_dir}/markers_assoc_G_subset_{output_suffix}.txt\
-                    --out {sim_output_dir}/G_subset_{output_suffix}
-                '''
-            result = subprocess.run(plink_extract, shell=True, check=True, executable="/bin/bash")
-            G_path=f'{sim_output_dir}/G_subset_{output_suffix}.raw'
+        #     markers_assoc = list(set([x for sub in simulation_metadata['markers_assoc'].values() for x in sub]))
+        #     with open(f'{sim_output_dir}/markers_assoc_G_subset_{output_suffix}.txt','w') as f:
+        #         for snp in markers_assoc:
+        #             f.write(snp + "\n")
+        #     plink_extract = f'''
+        #         module load plink/1.9 && plink --bfile {sim_output_dir}/G_{output_suffix} \
+        #             --recode A \
+        #             --extract {sim_output_dir}/markers_assoc_G_subset_{output_suffix}.txt\
+        #             --out {sim_output_dir}/G_subset_{output_suffix}
+        #         '''
+        #     result = subprocess.run(plink_extract, shell=True, check=True, executable="/bin/bash")
+        #     G_path=f'{sim_output_dir}/G_subset_{output_suffix}.raw'
 
         return  MLFlowWrapper.train_with_mlflow(algorithm_func=RGWASWrapper.RGWASWrapper,
         artifact_dir=artifact_dir,
@@ -206,7 +199,7 @@ executor.update_parameters(
     },
 )
 tuning_runs = ['SCoNE','SCoNE(Fro)','sHNMF','MVBC']  # all of these runs have sparsity parameters that need to be tuned 
-testing_runs = ['G-NMF'] # TODO: change back to ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','RGWAS','MVBC']
+testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE'] # TODO: change back to ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','RGWAS','MVBC']
 # PRELIMINARY: set up fixed params across experiments
 
 # STEP 1: hparam tuning with 1 randomly selected dataset per experiment (and then remove it from testing)
@@ -215,7 +208,7 @@ if tuning:
     cfgs = [
         dict(
             g_ps=g_ps, c_ps=c_ps, e=e, dataset=tuning_dataset[g_ps,c_ps, e],
-            num_init = 10, num_markers=num_markers,
+            num_init = 10, 
             Z=Z if run_name != 'sHNMF' else np.zeros((Z.shape[0],Z.shape[1])), rank=rank,
             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C,lambda_Gloss=1,
             max_outer=max_outer, min_outer=5, tol=1e-6,
@@ -274,7 +267,7 @@ if testing:
     cfgs = [
         dict(
             g_ps=g_ps, c_ps=c_ps, e=e, dataset=idx,
-            num_init = 10, num_markers=num_markers,
+            num_init = 10, 
             Z=Z if run_name not in ['sHNMF','HNMF','G-NMF','C-NMF'] else np.zeros((Z.shape[0],Z.shape[1])), rank=rank,
             lambda_W=lambda_W, lambda_H_G=lambda_H_G, lambda_H_C=lambda_H_C, lambda_Gloss=1,
             max_outer=max_outer, min_outer=5, tol=1e-6, 
@@ -315,7 +308,7 @@ if loss_and_consistency_check:
 
     cfgs = [ dict(
             g_ps=0, c_ps=0, e=1, dataset=0,
-            num_init = 1, num_markers=num_markers,
+            num_init = 1, 
             Z=Z, rank=rank,
             lambda_W=0, lambda_H_G=0, lambda_H_C=0, lambda_Gloss=1, # TODO: fix lambda values
             max_outer=max_outer, min_outer=5, tol=1e-5, 

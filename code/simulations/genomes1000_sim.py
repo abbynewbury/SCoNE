@@ -183,13 +183,12 @@ def sun_generate_sim_data(G_path,igsr_samples_filepath,
         wvar = (w * (X - mu)**2).sum(axis=0) / w.sum()
         weighted_variance = pd.DataFrame(wvar, index=G.columns, columns=["weighted_variance"]).reset_index().rename(columns={'index': 'gene'})
 
-        fifth_percentile = weighted_variance['weighted_variance'].quantile(0.05) 
+        tenth_percentile = weighted_variance['weighted_variance'].quantile(0.1) 
         q1 = weighted_variance['weighted_variance'].quantile(0.25)
         q3 = weighted_variance['weighted_variance'].quantile(0.75)
         # Mark bottom/top quartiles; leave middle as NaN 
         weighted_variance["var_quartile"] = np.select([weighted_variance['weighted_variance'] <= q1, weighted_variance['weighted_variance'] >= q3],[0.25, 0.75],default=np.nan)
-        weighted_variance["null_pool"] = weighted_variance['weighted_variance'] <= fifth_percentile
-
+        weighted_variance["null_pool"] = weighted_variance['weighted_variance'] <= tenth_percentile
         # select genes (num_genes markers where half are in right af_var_quartile and half are from null pool)
         assert 3*g <= num_genes/2, f"{3*g} linked genes greater than {num_genes/2} genes to be pulled from null pool"
         selected_genes = []
