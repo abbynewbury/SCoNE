@@ -1,8 +1,5 @@
 import numpy as np
 from collections import defaultdict
-from scipy.optimize import minimize
-from scipy.special import gammaln
-from utilities import vec2mats, mats2vec, sigmoid
 from scipy.special import xlogy
 
 def compute_loss(X,X_hat,loss_type):
@@ -272,7 +269,7 @@ def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, l1=
 
 def alternating_opt(
     G,C,Z,              # true matrices
-    rank, num_init, # init: number of initializations (will choose one with best loss as final result)
+    rank, num_init, # init: number of initializations (will choose one with best loss as final result), should have this=1 when test=True
     lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss,                  # regularization parameters
     G_loss_type, C_loss_type, # in 'kl_div',  'fro' or None (None indicates not fitting to data, i.e. if G_loss_type=None & C_loss_type='fro then C only optimization)
     max_inner=50, # options for pgd_armijo
@@ -281,7 +278,10 @@ def alternating_opt(
     inner_ftol=1e-5, # options for pgd_armijo (stopping criteria for ftol)
     max_outer=30,
     min_outer=5,
-    tol=1e-6
+    tol=1e-6,
+    # if test is True, W is the only factor matrix that will be optimized (for train/test split)
+    test=False,
+    H_G=None, H_C=None, U_G=None, U_C=None
 ):
     '''
     To remove sparsity (CoNE) - set all lambda = 0
@@ -317,16 +317,11 @@ def alternating_opt(
     for run in range(num_init):
         # initialize factor matrices
         W = np.random.uniform(low=0.1,high=1,size=(G.shape[0], rank))
-        H_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], rank))
-        H_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], rank)) 
-        U_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], Z.shape[1]))
-        U_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], Z.shape[1]))
-        s=1/np.mean([np.sum(W@H_G.T + Z@U_G.T),np.sum(W@H_C.T + Z@U_C.T)])# scale them (not necessary but makes more numerically stable)
-        W *= s
-        H_G *= s
-        H_C *= s
-        U_G *= s
-        U_C *= s
+        if not test:
+            H_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], rank))
+            H_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], rank)) 
+            U_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], Z.shape[1]))
+            U_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], Z.shape[1]))
 
         # initial objective
         loss_dict = defaultdict(list)
@@ -334,10 +329,10 @@ def alternating_opt(
 
         for _ in range(max_outer):
             W   = one_block_update("W", W)
-            if G_loss_type is not None:
+            if G_loss_type is not None and not test:
                 H_G = one_block_update("H_G", H_G)
                 U_G = one_block_update("U_G", U_G)
-            if C_loss_type is not None:
+            if C_loss_type is not None and not test:
                 H_C = one_block_update("H_C", H_C)
                 U_C = one_block_update("U_C", U_C)
 

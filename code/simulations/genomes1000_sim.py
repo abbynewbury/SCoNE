@@ -192,16 +192,13 @@ def sun_generate_sim_data(G_path,igsr_samples_filepath,
         # select genes (num_genes markers where half are in right af_var_quartile and half are from null pool)
         assert 3*g <= num_genes/2, f"{3*g} linked genes greater than {num_genes/2} genes to be pulled from null pool"
         selected_genes = []
+        linked_gene_set = []
         # generate genetic subgroups
-        genetic_subgroup_dfs = []
         for genetic_subgroup in range(3):
             linked_genes = weighted_variance[weighted_variance["null_pool"]].sample(n=g, replace=False, random_state=rs(streams,"genes"))['gene'].values.tolist() 
+            linked_gene_set.append(linked_genes)
             genes_assoc_df.append(pd.DataFrame({'genetic subgroup':genetic_subgroup, 'gene': linked_genes}))
             selected_genes.extend(linked_genes)
-            s = G[linked_genes].sum(axis=1)
-            genetic_subgroup_df = pd.DataFrame({'in_subgroup': (s >= s.quantile(0.8)).astype(int),'burden_sum': s, 'subgroup':genetic_subgroup})
-            genetic_subgroup_dfs.append(genetic_subgroup_df)
-        genetic_subgroup_dfs = pd.concat(genetic_subgroup_dfs)
         # draw such that half from null and half from stratified pool
         genes_assoc_df = pd.concat(genes_assoc_df)
         if num_genes//2 - len(genes_assoc_df['gene'].unique())>0:
@@ -219,25 +216,26 @@ def sun_generate_sim_data(G_path,igsr_samples_filepath,
         gene_pool = G.columns.tolist()
 
         selected_genes = []
+        linked_gene_set = []
         # generate genetic subgroups
-        genetic_subgroup_dfs = []
         for genetic_subgroup in range(3):
             linked_genes = streams["genes"].choice(gene_pool,size=g, replace=False).tolist()
+            linked_gene_set.append(linked_genes)
             genes_assoc_df.append(pd.DataFrame({'genetic subgroup':genetic_subgroup, 'gene': linked_genes}))
             selected_genes.extend(linked_genes)
-            s = G[linked_genes].sum(axis=1)
-            genetic_subgroup_df = pd.DataFrame({'in_subgroup': (s >= s.quantile(0.8)).astype(int),'burden_sum': s, 'subgroup':genetic_subgroup})
-            genetic_subgroup_dfs.append(genetic_subgroup_df)
-        genetic_subgroup_dfs = pd.concat(genetic_subgroup_dfs)
         genes_assoc_df = pd.concat(genes_assoc_df)
         selected_genes.extend(streams["genes"].choice(list(set(gene_pool)-set(selected_genes)),size=num_genes-len(set(selected_genes)), replace=False).tolist()) 
     assert len(set(selected_genes)) == num_genes
 
-    # keep individuals in exactly one subgroup
-    keep_iids = (genetic_subgroup_dfs.loc[genetic_subgroup_dfs['in_subgroup'].eq(1)]
-            .groupby(level=0).size().loc[lambda s: s==1].index)
-    genetic_subgroup_dfs = genetic_subgroup_dfs.loc[keep_iids].copy()
+    # Generate genetic subgroups
+    S = pd.concat([G[genes].sum(axis=1) for genes in linked_gene_set], axis=1)
+    S.columns = [0, 1, 2]   
+    true_subgp = S.values.argmax(axis=1) # assign by argmax
+    W = pd.get_dummies(pd.Series(true_subgp, index=G.index), dtype=int)
+    W = W.reindex(columns=[0, 1, 2], fill_value=0)
+    genetic_subgroup_dfs = W.stack().rename('in_subgroup').to_frame().reset_index().rename(columns={'level_0':'IID','level_1':'subgroup'}).set_index('IID')
     iid_order = [i for i in iid_order if i in genetic_subgroup_dfs.index]
+    genetic_subgroup_dfs = genetic_subgroup_dfs.loc[iid_order]
     # write G
     G = G.loc[iid_order][selected_genes].copy()
     G.to_csv(f'{output_dir}/G_{output_file_suffix}')
