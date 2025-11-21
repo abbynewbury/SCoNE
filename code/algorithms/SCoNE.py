@@ -13,7 +13,10 @@ def compute_loss(X,X_hat,loss_type):
     else: assert True == False, f"{loss_type} not a valid loss type, should be one of 'kl_div', 'fro', None"
 
 def l1_norm(x):
-    return np.sum(np.abs(x),dtype=np.float64)
+    if x is not None:
+        return np.sum(np.abs(x),dtype=np.float64)
+    else:
+        return 0
 
 def compute_jac(sample_matrix, X, X_hat, loss_type, for_W=False):
     '''
@@ -113,8 +116,10 @@ def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, 
 
 def make_fg_HG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type):
     # Precompute terms independent of H_G
-    C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type)
-    C_loss = compute_loss(C,C_hat,C_loss_type)
+    if C_loss_type is not None:
+        C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type)
+        C_loss = compute_loss(C,C_hat,C_loss_type)
+    else: C_loss = 0
     def _forward(x):
         H_G = x.reshape(shape, order='F')
         G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type) # could cut down on matrix multiplications if use precalculated Z@U_G.T for fun and jac
@@ -135,8 +140,10 @@ def make_fg_HG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type,
 
 def make_fg_HC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type):
     # Precompute terms independent of H_C
-    G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
-    G_loss = compute_loss(G,G_hat,G_loss_type)
+    if G_loss_type is not None:
+        G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
+        G_loss = compute_loss(G,G_hat,G_loss_type)
+    else: G_loss = 0
     def _forward(x):
         H_C = x.reshape(shape, order='F')
         C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type)
@@ -157,8 +164,10 @@ def make_fg_HC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type,
 
 def make_fg_UG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type):
     # Precompute terms independent of U_G
-    C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type)
-    C_loss = compute_loss(C,C_hat,C_loss_type)
+    if C_loss_type is not None:
+        C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type)
+        C_loss = compute_loss(C,C_hat,C_loss_type)
+    else: C_loss = 0
     def _forward(x):
         U_G = x.reshape(shape, order='F')
         G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
@@ -179,8 +188,10 @@ def make_fg_UG(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type,
 
 def make_fg_UC(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type):
     # Precompute terms independent of U_C
-    G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
-    G_loss = compute_loss(G,G_hat,G_loss_type)
+    if G_loss_type is not None:
+        G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
+        G_loss = compute_loss(G,G_hat,G_loss_type)
+    else: G_loss = 0
     def _forward(x):
         U_C = x.reshape(shape, order='F')
         C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type)
@@ -314,14 +325,23 @@ def alternating_opt(
         return x.reshape(X.shape, order='F')
 
     best_total_loss = np.inf
+    N = G.shape[0] if G is not None else C.shape[0]
     for run in range(num_init):
         # initialize factor matrices
-        W = np.random.uniform(low=0.1,high=1,size=(G.shape[0], rank))
+        W = np.random.uniform(low=0.1,high=1,size=(N, rank))
         if not test:
-            H_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], rank))
-            H_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], rank)) 
-            U_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], Z.shape[1]))
-            U_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], Z.shape[1]))
+            if G is not None:
+                H_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], rank))
+                U_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], Z.shape[1]))
+            else:
+                H_G = None
+                U_G = None
+            if C is not None:
+                H_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], rank)) 
+                U_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], Z.shape[1]))
+            else:
+                H_C = None
+                U_C = None
 
         # initial objective
         loss_dict = defaultdict(list)
@@ -345,17 +365,21 @@ def alternating_opt(
             
             # record matrix norms
             loss_dict['W_norm'].append(np.linalg.norm(W))
-            loss_dict['H_G_norm'].append(np.linalg.norm(H_G))
-            loss_dict['H_C_norm'].append(np.linalg.norm(H_C))
-            loss_dict['U_G_norm'].append(np.linalg.norm(U_G))
-            loss_dict['U_C_norm'].append(np.linalg.norm(U_C))
+            if G_loss_type is not None:
+                loss_dict['H_G_norm'].append(np.linalg.norm(H_G))
+                loss_dict['U_G_norm'].append(np.linalg.norm(U_G))
+            if C_loss_type is not None:
+                loss_dict['H_C_norm'].append(np.linalg.norm(H_C))
+                loss_dict['U_C_norm'].append(np.linalg.norm(U_C))
 
             # record sparsity
             loss_dict['W_sparsity'].append(100*np.count_nonzero(W == 0)/ W.size)
-            loss_dict['H_G_sparsity'].append(100*np.count_nonzero(H_G == 0)/ H_G.size)
-            loss_dict['H_C_sparsity'].append(100*np.count_nonzero(H_C == 0)/ H_C.size)
-            loss_dict['U_G_sparsity'].append(100*np.count_nonzero(U_G == 0)/ U_G.size)
-            loss_dict['U_C_sparsity'].append(100*np.count_nonzero(U_C == 0)/ U_C.size)
+            if G_loss_type is not None:
+                loss_dict['H_G_sparsity'].append(100*np.count_nonzero(H_G == 0)/ H_G.size)
+                loss_dict['U_G_sparsity'].append(100*np.count_nonzero(U_G == 0)/ U_G.size)
+            if C_loss_type is not None:
+                loss_dict['H_C_sparsity'].append(100*np.count_nonzero(H_C == 0)/ H_C.size)
+                loss_dict['U_C_sparsity'].append(100*np.count_nonzero(U_C == 0)/ U_C.size)
             #assert f_cur<=f_prev*(1+0.1), f"loss increasing (by more than 10% x previous loss): {f_prev} -> {f_cur}"
             if ((f_prev - f_cur) / max(1.0, abs(f_prev)) < tol) and _ >= min_outer:
                 break
@@ -368,8 +392,14 @@ def alternating_opt(
             norms = np.linalg.norm(W, axis=0)
             norms[norms == 0] = 1.0
             W_normed = W / norms
+            final_factor_matrices = {"W":W_normed}
             # scale rows of H_G and H_C
-            H_G_normed = H_G * norms[np.newaxis, :]
-            H_C_normed = H_C * norms[np.newaxis, :]
-            final_factor_matrices = {"W":W_normed, "H_G":H_G_normed, "H_C":H_C_normed, "U_G":U_G, "U_C":U_C}
+            if G_loss_type is not None:
+                H_G_normed = H_G * norms[np.newaxis, :]
+                final_factor_matrices["H_G"] = H_G_normed
+                final_factor_matrices["U_G"] = U_G
+            if C_loss_type is not None:
+                H_C_normed = H_C * norms[np.newaxis, :]
+                final_factor_matrices["H_C"] = H_C_normed
+                final_factor_matrices["U_C"] = U_C
     return final_factor_matrices, final_loss_dict
