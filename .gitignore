@@ -7,3 +7,4 @@ output/*
 !.gitignore
 !readme.md
 !code/simulate_data.ipynb
+!code/test_reconstruction.ipynb
