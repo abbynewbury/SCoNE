@@ -11,10 +11,8 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
   lz  <- lambda_W
 
   # --- Read G ---
-  hdr <- fread(G_path, nrows = 0)
-  sel <- 7:ncol(hdr)
-  G   <- fread(G_path, select = sel, colClasses = list(numeric = sel), integer64 = "double")
-  G   <- as.matrix(G)
+  G <- npyLoad(G_path,"integer")
+  storage.mode(G) <- "double"
 
   # --- Read C (.npy) ---
   C <- npyLoad(C_path,"integer")
@@ -56,7 +54,7 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
     total_loss_i <- G_plus_C_loss_i + lambda_W*l0(result$z) + lambda_H_G*l0(result$V[[1]]) + lambda_H_C*l0(result$V[[2]]) 
     total_loss[[i]] <- total_loss_i
     G_plus_C_loss[[i]] <- G_plus_C_loss_i
-
+    print(G_plus_C_loss_i)
     # drop individuals in cluster
     drop_mask <- cl == 1 # individuals to drop before next rank 1 run 
     if (all(drop_mask, na.rm = TRUE)) {

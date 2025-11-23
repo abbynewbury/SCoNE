@@ -120,6 +120,7 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
         ground_truth=ground_truth,
         experiment_name=str(exp_num),confounding_matrix=confounding_matrix)
     elif run_name == 'MVBC':
+        assert True==False, "this doesn't work anymore since I switched to npyLoad for G (not working with bfiles)"
         return  MLFlowWrapper.train_with_mlflow(algorithm_func=MVBCWrapper.MVBCWrapper,
         artifact_dir=artifact_dir,
         run_name=run_name,
@@ -132,6 +133,7 @@ def run_one_wrapper(g_ps, c_ps, e, dataset, num_init,
         ground_truth=ground_truth,
         experiment_name=str(exp_num),confounding_matrix=confounding_matrix)
     elif run_name == 'RGWAS':
+        assert True==False, "this doesn't work anymore since I switched to npyLoad for G (not working with bfiles)"
         Z_path = f'{root_dir}/release-20130502-supporting/admixture_files/ALL.wgs.phase3_shapeit2_filtered.20141217.maf0.05.5.Q'
         # save iid index
         iid_index_path = f'{sim_output_dir}/iid_index_{output_suffix}.npy'
