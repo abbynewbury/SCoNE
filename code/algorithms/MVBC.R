@@ -24,13 +24,15 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
   total_loss <- list()
   G_plus_C_loss <- list()
   for (i in seq_len(rank)){
-    if(i==rank || length(remaining)==1){ # in this case last rank gets all remaining individuals
+    if(i==rank || length(remaining)<=5){ # in this case next rank gets all remaining individuals
         cl_full <- rep(0, nrow(G)) 
         cl_full[remaining] <- 1
         W[, i] <- cl_full
         break}
     G_i <- G[remaining, , drop = FALSE]
     C_i <- C[remaining, , drop = FALSE]
+    stopifnot(!any(is.nan(G)))
+    stopifnot(!any(is.nan(C)))
     datasets <- list(G_i, C_i)
     result <- mvsvdl1(datasets, lvs, lz)
     # store W
@@ -38,7 +40,6 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
     cl_full <- rep(0, nrow(G))  # fill with 0s by default
     cl_full[remaining] <- cl  
     W[, i] <- cl_full
-
     # compute loss
     G_plus_C_loss_i <- 0
     for (j in seq_len(length(datasets))) {
@@ -54,7 +55,6 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
     total_loss_i <- G_plus_C_loss_i + lambda_W*l0(result$z) + lambda_H_G*l0(result$V[[1]]) + lambda_H_C*l0(result$V[[2]]) 
     total_loss[[i]] <- total_loss_i
     G_plus_C_loss[[i]] <- G_plus_C_loss_i
-    print(G_plus_C_loss_i)
     # drop individuals in cluster
     drop_mask <- cl == 1 # individuals to drop before next rank 1 run 
     if (all(drop_mask, na.rm = TRUE)) {
@@ -66,7 +66,9 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
   }
   # compute loss as sum over len(rank)
   factor_matrices <- list(W = W)
-  loss_history <- list(G_plus_C_loss=mean(unlist(G_plus_C_loss)), total_loss=mean(unlist(total_loss)))
+  mean_weights <- colSums(W)[seq_len(length(G_plus_C_loss))]
+  loss_history <- list(G_plus_C_loss=sum(unlist(G_plus_C_loss) * mean_weights) / sum(mean_weights),
+                       total_loss=sum(unlist(total_loss) * mean_weights) / sum(mean_weights))
   output <- list(factor_matrices = factor_matrices,loss_history = loss_history)
   cat(toJSON(output, auto_unbox = TRUE))
 }
