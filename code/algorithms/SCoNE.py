@@ -287,7 +287,7 @@ def alternating_opt(
     rho=0.1, # options for pgd_armijo (n shrink factor)
     sigma=1e-4, # options for pgd_armijo (Armijo constant)
     inner_ftol=1e-5, # options for pgd_armijo (stopping criteria for ftol)
-    max_outer=30,
+    max_outer=200,
     min_outer=5,
     tol=1e-6,
     # if test is True, W is the only factor matrix that will be optimized (for train/test split)
@@ -388,18 +388,21 @@ def alternating_opt(
         if f_cur < best_total_loss:
             best_total_loss = f_cur # reset
             final_loss_dict = loss_dict
-            # Normalize columns of W to L2 norm and scale rows of H to resolve scaling ambiguity
-            norms = np.linalg.norm(W, axis=0)
-            norms[norms == 0] = 1.0
-            W_normed = W / norms
-            final_factor_matrices = {"W":W_normed}
-            # scale rows of H_G and H_C
-            if G_loss_type is not None:
-                H_G_normed = H_G * norms[np.newaxis, :]
-                final_factor_matrices["H_G"] = H_G_normed
-                final_factor_matrices["U_G"] = U_G
-            if C_loss_type is not None:
-                H_C_normed = H_C * norms[np.newaxis, :]
-                final_factor_matrices["H_C"] = H_C_normed
-                final_factor_matrices["U_C"] = U_C
+            if not test:
+                # Normalize columns of W to L2 norm and scale rows of H to resolve scaling ambiguity
+                norms = np.linalg.norm(W, axis=0)
+                norms[norms == 0] = 1.0
+                W_normed = W / norms
+                final_factor_matrices = {"W":W_normed}
+                # scale rows of H_G and H_C
+                if G_loss_type is not None:
+                    H_G_normed = H_G * norms[np.newaxis, :]
+                    final_factor_matrices["H_G"] = H_G_normed
+                    final_factor_matrices["U_G"] = U_G
+                if C_loss_type is not None:
+                    H_C_normed = H_C * norms[np.newaxis, :]
+                    final_factor_matrices["H_C"] = H_C_normed
+                    final_factor_matrices["U_C"] = U_C
+            else:
+                final_factor_matrices = {"W":W}
     return final_factor_matrices, final_loss_dict

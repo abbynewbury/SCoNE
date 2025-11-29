@@ -11,7 +11,6 @@ def RGWASWrapper(r_path, G_path, C_path, Z_path, rank=3, num_init=10):
     text=True,
     shell=True, executable='/bin/bash')
     r_output = result.stdout.strip()
-    print(r_output)
     start = r_output.find('{')
     end = r_output.rfind('}')
     json_str = r_output[start:end+1]

@@ -22,7 +22,6 @@ storage.mode(Z) <- "double"
 Z <- Z[,-ncol(Z)] # last column of Z is perfectly multicollinear with rest
 
 covars <- cbind(1,G,Z)
-print(dim(covars))
 C_binary <- (C != 0) + 0L
 result <- mfmr(Yb=C_binary,  Yq=NULL, G=covars, K=rank, nrun=num_init)
 cat(toJSON(result, auto_unbox = TRUE))

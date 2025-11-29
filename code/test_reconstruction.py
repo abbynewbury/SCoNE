@@ -85,6 +85,7 @@ def simulate_views(n=2500, num_genes=100, M_C=100, M_Z=5, rank=3, seed=0, ZU_wei
     # generate superpop shift for each feature
     U_C = proj_nonneg(rng.normal(size=(M_C, M_Z)))
     U_G =  proj_nonneg(rng.normal(size=(num_genes, M_Z)))
+
     # generate 5 superpopulations
     superpops = rng.permutation(n) % M_Z   
     Z = (superpops[:, None] == np.arange(M_Z)).astype(int) 
@@ -98,12 +99,12 @@ def simulate_views(n=2500, num_genes=100, M_C=100, M_Z=5, rank=3, seed=0, ZU_wei
 
     
     # Means
-    M_c = W_C@H_C.T + (ZU_weight)*Z@U_C.T + (noise)*proj_nonneg(rng.normal(size=(n, M_C)))
-    M_g = W_G@H_G.T + (ZU_weight)*Z@U_G.T + (noise)*proj_nonneg(rng.normal(size=(n, num_genes)))
+    M_c = W_C@H_C.T + (ZU_weight)*Z@U_C.T + (noise)*rng.normal(size=(n, M_C))
+    M_g = W_G@H_G.T + (ZU_weight)*Z@U_G.T + (noise)*rng.normal(size=(n, num_genes))
 
     # Generate the two observed matrices
-    G = rng.poisson(M_g)  
-    C = rng.poisson(M_c)          
+    G = rng.poisson(np.exp(M_g))  
+    C = rng.poisson(np.exp(M_c))          
 
     return {"G": G, "C": C, "Z":Z, "W_C": W_C, "W_G":W_G, "H_G": H_G, "H_C": H_C, "U_G": U_G, "U_C": U_C}
 
@@ -171,17 +172,18 @@ def run_one(variable_name, variable_range):
     all_testing_results = []
     for variable in variable_range:
         # SIMUALTE DATA 
-        sim_kwargs = {"n":500,"M_C":10,"num_genes":10,variable_name:variable,"seed":0} 
+        sim_kwargs = {"n":500,"M_C":20,"num_genes":20,"noise":0.5,"ZU_weight": 0.5,"sparsity":0,"rho":1,"seed":0} 
+        sim_kwargs[variable_name] = variable
         sim = simulate_views(**sim_kwargs) 
         # write G,C,Z to paths
         np.save(f'{tmp_folder}/G_{variable_name}_{variable}',sim["G"])
         np.save(f'{tmp_folder}/C_{variable_name}_{variable}',sim["C"])
         np.save(f'{tmp_folder}/Z_{variable_name}_{variable}',sim["Z"])
         # TUNING
-        lambda_options = [1e-4,1e-2,1] # TODO switch back to [1e-4,1e-3,1e-2,1,10,100,1000] 
+        lambda_options = [1e-4,1e-3,1e-2,1,10,100] # TODO switch back to [1e-4,1e-3,1e-2,1,10,100,1000] 
         lambda_combos = product(lambda_options,lambda_options,lambda_options)
         cfgs = []
-        for init in range(10):
+        for init in range(50):
             for lambda_W, lambda_H_G, lambda_H_C in lambda_combos:
                 for run_name in tuning_runs:
                     algorithm_kwargs = {"run_name":run_name,"G":sim["G"] if not 'C-' in run_name else None,
@@ -208,14 +210,17 @@ def run_one(variable_name, variable_range):
     
         # testing set
         print('starting with test set',flush=True)
-        sim_kwargs = {"n":500,"M_C":10,"num_genes":10,variable_name:variable,"seed":1} 
+        sim_kwargs = {"n":500,"M_C":10,"num_genes":10,"noise":0.5,"ZU_weight": 0.5,"sparsity":0,"rho":1,"seed":0} 
+        sim_kwargs[variable_name] = variable
         # write G,C,Z to paths
         np.save(f'{tmp_folder}/G_{variable_name}_{variable}',sim["G"])
         np.save(f'{tmp_folder}/C_{variable_name}_{variable}',sim["C"])
         np.save(f'{tmp_folder}/Z_{variable_name}_{variable}',sim["Z"])
+        sim_kwargs = {"n":500,"M_C":20,"num_genes":20,"noise":0.5,"ZU_weight": 0.5,"sparsity":0,"rho":1,"seed":1} 
+        sim_kwargs[variable_name] = variable
         sim = simulate_views(**sim_kwargs) 
         cfgs = []
-        for init in range(10):
+        for init in range(50):
             for run_name in testing_runs:
                 if run_name in tuning_runs:
                     assert best[(best['run_name']==run_name)].shape[0] == 1
@@ -249,17 +254,17 @@ def run_one(variable_name, variable_range):
 
     return summary
 
-# ASSESS RUNS OVER CORRELATION
-summary = run_one("rho", np.arange(0,1.1,0.1))
-summary.to_csv(f'{root_dir}/output/rho_summary.csv')
+# # ASSESS RUNS OVER CORRELATION
+# summary = run_one("rho", np.arange(0,1.1,0.1))
+# summary.to_csv(f'{root_dir}/output/rho_summary.csv')
 
-# ASSESS RUNS OVER WEIGHT OF COVARIATE SIGNAL
-summary = run_one("ZU_weight", [0.25,0.5,0.75,1,1.5,2])
-summary.to_csv(f'{root_dir}/output/zu_weight_summary.csv')
+# # ASSESS RUNS OVER WEIGHT OF COVARIATE SIGNAL
+# summary = run_one("ZU_weight", [0.25,0.5,0.75,1,1.5,2])
+# summary.to_csv(f'{root_dir}/output/zu_weight_summary.csv')
 
-# ASSESS RUNS OVER NOISE
-summary = run_one("noise",  np.arange(0,1.1,0.1))
-summary.to_csv(f'{root_dir}/output/noise_summary.csv')
+# # ASSESS RUNS OVER NOISE
+# summary = run_one("noise",  np.arange(0,1.1,0.1))
+# summary.to_csv(f'{root_dir}/output/noise_summary.csv')
 
 # ASSESS RUNS OVER SPARSITY
 summary = run_one("sparsity",  np.arange(0,1.1,0.1))
