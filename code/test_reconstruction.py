@@ -128,37 +128,37 @@ def _call_kwargs(kw):
 def run_one_wrapper(run_name,G,C,Z,lambda_W,lambda_H_G,lambda_H_C,lambda_Gloss,G_loss_type,C_loss_type,
                     G_path,C_path,Z_path,sim,variable_name,variable,rank=3,init_name=1):
     results = []
-    results_columns = ['run_name','factor_matrix','init','sim','total_loss']
+    results_columns = ['run_name','factor_matrix','init','sim','tuning_loss']
     # simulate data
-    if run_name in ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','sHNMF','CoNE(Fro)']:
+    if run_name in ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)']:
         algorithm_func_kwargs={"G":G, "C":C, "Z":Z,"rank":rank, "num_init":1,
                         "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C,"lambda_Gloss":lambda_Gloss,
                         "max_inner":50, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4,
                         "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
                         "max_outer":100, "min_outer":5, "tol":1e-6}
         factor_matrices, loss_function = SCoNE.alternating_opt(**algorithm_func_kwargs)
-        total_loss = loss_function['total_loss'][-1]
+        tuning_loss = loss_function['total_loss'][-1] 
     elif run_name == 'MVBC':
         algorithm_func_kwargs = {"G_path":G_path,"C_path":C_path, "rank":rank,
                     "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C, "r_path":'/gpfs/commons/home/anewbury/miniconda/bin/Rscript'}
         factor_matrices, loss_function = MVBCWrapper.MVBCWrapper(**algorithm_func_kwargs)
         if factor_matrices is False: # run failed for reasons specified in MVBCWrapper
             return pd.DataFrame() 
-        total_loss = loss_function['total_loss'][-1]
+        tuning_loss = loss_function['total_loss'][-1]
     elif run_name == 'RGWAS':
         algorithm_func_kwargs = {"r_path":'/gpfs/commons/home/anewbury/miniconda/bin/Rscript', "G_path":G_path,
                         "C_path":C_path, "Z_path":Z_path, "num_init":1,"rank":rank}
         factor_matrices, loss_function = RGWASWrapper.RGWASWrapper(**algorithm_func_kwargs)
         if factor_matrices is False: # run failed for reasons specified in RGWASWrapper
             return pd.DataFrame() 
-        total_loss = -loss_function['ll'][-1]
+        tuning_loss = -loss_function['ll'][-1]
     else: assert True == False, f"invalid run name {run_name}"
     for k,v in factor_matrices.items():
         if k=="W":
-            results.append([run_name,"W_C",init_name,best_permutation_similarity(sim["W_C"],v),total_loss])
-            results.append([run_name,"W_G",init_name,best_permutation_similarity(sim["W_G"],v),total_loss])
+            results.append([run_name,"W_C",init_name,best_permutation_similarity(sim["W_C"],v),tuning_loss])
+            results.append([run_name,"W_G",init_name,best_permutation_similarity(sim["W_G"],v),tuning_loss])
         else:
-            results.append([run_name,k,init_name,best_permutation_similarity(sim[k],v),total_loss])
+            results.append([run_name,k,init_name,best_permutation_similarity(sim[k],v),tuning_loss])
     results = pd.DataFrame(results,columns=results_columns)
     results[variable_name] = variable
     results['lambda_W'] = lambda_W
@@ -167,8 +167,8 @@ def run_one_wrapper(run_name,G,C,Z,lambda_W,lambda_H_G,lambda_H_C,lambda_Gloss,G
     return results
 
 def run_one(variable_name, variable_range):
-    testing_runs = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','RGWAS','MVBC']
-    tuning_runs = ['SCoNE','SCoNE(Fro)','MVBC']
+    testing_runs = ['HNMF','SCoNE']#['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','RGWAS','MVBC']
+    tuning_runs = ['SCoNE']# ,'SCoNE(Fro)','MVBC']
     all_testing_results = []
     for variable in variable_range:
         # SIMUALTE DATA 
@@ -180,10 +180,10 @@ def run_one(variable_name, variable_range):
         np.save(f'{tmp_folder}/C_{variable_name}_{variable}',sim["C"])
         np.save(f'{tmp_folder}/Z_{variable_name}_{variable}',sim["Z"])
         # TUNING
-        lambda_options = [1e-4,1e-3,1e-2,1,10,100] # TODO switch back to [1e-4,1e-3,1e-2,1,10,100,1000] 
+        lambda_options = [1e-4,1e-3,1e-2,1]  
         lambda_combos = product(lambda_options,lambda_options,lambda_options)
         cfgs = []
-        for init in range(50):
+        for init in range(10):
             for lambda_W, lambda_H_G, lambda_H_C in lambda_combos:
                 for run_name in tuning_runs:
                     algorithm_kwargs = {"run_name":run_name,"G":sim["G"] if not 'C-' in run_name else None,
@@ -200,8 +200,7 @@ def run_one(variable_name, variable_range):
         with ProcessPoolExecutor() as pool:
             results_list = list(pool.map(_call_kwargs, cfgs))
         tuning_results = pd.concat(results_list, ignore_index=True)
-
-        idx = tuning_results.groupby(['run_name'])["total_loss"].idxmin()
+        idx = tuning_results.groupby(['run_name'])["tuning_loss"].idxmin()
         best = (
             tuning_results.loc[idx, tuning_results.columns]
             .reset_index(drop=True)
@@ -210,17 +209,15 @@ def run_one(variable_name, variable_range):
     
         # testing set
         print('starting with test set',flush=True)
-        sim_kwargs = {"n":500,"M_C":10,"num_genes":10,"noise":0.5,"ZU_weight": 0.5,"sparsity":0,"rho":1,"seed":0} 
+        sim_kwargs = {"n":500,"M_C":20,"num_genes":20,"noise":0.5,"ZU_weight": 0.5,"sparsity":0,"rho":1,"seed":1} 
         sim_kwargs[variable_name] = variable
+        sim = simulate_views(**sim_kwargs) 
         # write G,C,Z to paths
         np.save(f'{tmp_folder}/G_{variable_name}_{variable}',sim["G"])
         np.save(f'{tmp_folder}/C_{variable_name}_{variable}',sim["C"])
         np.save(f'{tmp_folder}/Z_{variable_name}_{variable}',sim["Z"])
-        sim_kwargs = {"n":500,"M_C":20,"num_genes":20,"noise":0.5,"ZU_weight": 0.5,"sparsity":0,"rho":1,"seed":1} 
-        sim_kwargs[variable_name] = variable
-        sim = simulate_views(**sim_kwargs) 
         cfgs = []
-        for init in range(50):
+        for init in range(10):
             for run_name in testing_runs:
                 if run_name in tuning_runs:
                     assert best[(best['run_name']==run_name)].shape[0] == 1
@@ -252,20 +249,24 @@ def run_one(variable_name, variable_range):
     summary["ymin"] = summary["mean"] - summary["ci95"]
     summary["ymax"] = summary["mean"] + summary["ci95"]
 
-    return summary
+    return summary,all_testing_results
 
-# # ASSESS RUNS OVER CORRELATION
-# summary = run_one("rho", np.arange(0,1.1,0.1))
-# summary.to_csv(f'{root_dir}/output/rho_summary.csv')
+# ASSESS RUNS OVER CORRELATION
+summary,all_testing_results = run_one("rho", np.arange(0,1.1,0.1))
+summary.to_csv(f'{root_dir}/output/rho_summary.csv')
+all_testing_results.to_csv(f'{root_dir}/output/rho_all_testing_results.csv')
 
-# # ASSESS RUNS OVER WEIGHT OF COVARIATE SIGNAL
-# summary = run_one("ZU_weight", [0.25,0.5,0.75,1,1.5,2])
-# summary.to_csv(f'{root_dir}/output/zu_weight_summary.csv')
+# ASSESS RUNS OVER WEIGHT OF COVARIATE SIGNAL
+summary,all_testing_results = run_one("ZU_weight", [0.25,0.5,0.75,1,1.5,2])
+summary.to_csv(f'{root_dir}/output/zu_weight_summary.csv')
+all_testing_results.to_csv(f'{root_dir}/output/zu_weight_all_testing_results.csv')
 
-# # ASSESS RUNS OVER NOISE
-# summary = run_one("noise",  np.arange(0,1.1,0.1))
-# summary.to_csv(f'{root_dir}/output/noise_summary.csv')
+# ASSESS RUNS OVER NOISE
+summary,all_testing_results = run_one("noise",  np.arange(0,1.1,0.1))
+summary.to_csv(f'{root_dir}/output/noise_summary.csv')
+all_testing_results.to_csv(f'{root_dir}/output/noise_all_testing_results.csv')
 
 # ASSESS RUNS OVER SPARSITY
-summary = run_one("sparsity",  np.arange(0,1.1,0.1))
+summary,all_testing_results = run_one("sparsity",  np.arange(0,1.1,0.1))
 summary.to_csv(f'{root_dir}/output/sparsity_summary.csv')
+all_testing_results.to_csv(f'{root_dir}/output/sparsity_all_testing_results.csv')
