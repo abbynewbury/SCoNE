@@ -19,6 +19,8 @@ from scipy.optimize import linear_sum_assignment
 from plotnine import *
 import sys
 import json
+from sklearn.model_selection import train_test_split
+
 
 colors_dict = {
 "SCoNE":"#2f4b7c",
@@ -92,11 +94,12 @@ def simulate_views(n=2500, num_genes=100, M_C=100, M_Z=5, rank=3, seed=0, ZU_wei
     Z = (superpops[:, None] == np.arange(M_Z)).astype(int) 
 
     #2. impose sparsity (P(W_ij=0)=sparsity)
-    mask = np.random.rand(*(n,rank)) > sparsity
+    mask = np.random.rand(*(M_C,rank)) > sparsity
     H_C = H_C * mask
+    mask = np.random.rand(*(num_genes,rank)) > sparsity
     H_G = H_G * mask
 
-    
+
     avg_corr = np.mean([np.corrcoef(W_C[:,k], W_G[:,k])[0,1]
                     for k in range(W_C.shape[1])])
 
@@ -117,32 +120,41 @@ def frobenius_cosine_similarity(A, B):
     den = np.sqrt(np.trace(A.T @ A)) * np.sqrt(np.trace(B.T @ B))
     return num / den
 
-def best_permutation_similarity(W_true, W_hat):
+def relative_error(A,B):
+    # A is true
+    return np.linalg.norm(A-B)/np.linalg.norm(A)
+
+def best_permutation_similarity_and_relerror(W_true, W_hat):
     # Compute pairwise column inner products (the numerator terms)
     M = W_true.T @ W_hat 
     row_ind, col_ind = linear_sum_assignment(-M) # maximize numerator
     W_hat_perm = W_hat[:, col_ind] # optimal permutation
-    return frobenius_cosine_similarity(W_true, W_hat_perm)
+    return frobenius_cosine_similarity(W_true, W_hat_perm), relative_error(W_true, W_hat_perm)
 
 # CODE TO RUN ALL COMPARISON METHODS (AND PARALLELIZE)
 def _call_kwargs(kw):
     return run_one_wrapper(**kw)  # expands kwargs dict
 
 def run_one_wrapper(run_name,G,C,Z,lambda_W,lambda_H_G,lambda_H_C,lambda_Gloss,G_loss_type,C_loss_type,
-                    G_path,C_path,Z_path,sim,variable_name,variable,rank=3,init_name=1):
+                    G_path,C_path,Z_path,sim,variable_name,variable,rank=3,init_name=1,num_init=1,write=False):
     results = []
-    results_columns = ['run_name','factor_matrix','init','sim','tuning_loss']
+    results_columns = ['run_name','factor_matrix','init','sim',"rel_error",'tuning_loss']
 
     if run_name in ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)']:
-        algorithm_func_kwargs={"G":G, "C":C, "Z":Z,"rank":rank, "num_init":10, # TODO: change back
-                        "lambda_W":lambda_W, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C,"lambda_Gloss":lambda_Gloss,
+        # per Kim and Park, set alpha to the maximum element of G or C squared
+        if run_name in ['CoNE','SCoNE','SCoNE(Fro)']:
+            alpha = max(G.max(),C.max())**2
+        else:
+            alpha = 0
+        algorithm_func_kwargs={"G":G, "C":C, "Z":Z,"rank":rank, "num_init":num_init, 
+                        "alpha":alpha, "lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C,"lambda_Gloss":lambda_Gloss,
                         "max_inner":50, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4,
                         "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
                         "max_outer":100, "min_outer":5, "tol":1e-6}
         factor_matrices, loss_function = SCoNE.alternating_opt(**algorithm_func_kwargs)
-        print(f'in run one wrapper: {variable}',flush=True)
-        with open(f"/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/output/models/loss_function_lambdaval_{lambda_W}_sparsity_{variable}.json", "w") as f: # TODO: remove
-            json.dump(loss_function, f)
+        if variable_name=='sparsity' and write is True: # save so can visualize the loss in tuning over different lambda params
+            with open(f"/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/output/models/loss_function_lambdaval_{lambda_H_G}_sparsity_{variable}.json", "w") as f: # TODO: remove
+                json.dump(loss_function, f)
         tuning_loss = loss_function['G_loss'][-1] + loss_function['C_loss'][-1]
     elif run_name == 'MVBC':
         algorithm_func_kwargs = {"G_path":G_path,"C_path":C_path, "rank":rank,
@@ -161,10 +173,10 @@ def run_one_wrapper(run_name,G,C,Z,lambda_W,lambda_H_G,lambda_H_C,lambda_Gloss,G
     else: assert True == False, f"invalid run name {run_name}"
     for k,v in factor_matrices.items():
         if k=="W":
-            results.append([run_name,"W_C",init_name,best_permutation_similarity(sim["W_C"],v),tuning_loss])
-            results.append([run_name,"W_G",init_name,best_permutation_similarity(sim["W_G"],v),tuning_loss])
+            results.append([run_name,"W_C",init_name,best_permutation_similarity_and_relerror(sim["W_C"],v)[0],best_permutation_similarity_and_relerror(sim["W_C"],v)[1],tuning_loss])
+            results.append([run_name,"W_G",init_name,best_permutation_similarity_and_relerror(sim["W_G"],v)[0],best_permutation_similarity_and_relerror(sim["W_G"],v)[1],tuning_loss])
         else:
-            results.append([run_name,k,init_name,best_permutation_similarity(sim[k],v),tuning_loss])
+            results.append([run_name,k,init_name,best_permutation_similarity_and_relerror(sim[k],v)[0],best_permutation_similarity_and_relerror(sim[k],v)[1],tuning_loss])
     results = pd.DataFrame(results,columns=results_columns)
     results[variable_name] = variable
     results['lambda_W'] = lambda_W
@@ -172,17 +184,14 @@ def run_one_wrapper(run_name,G,C,Z,lambda_W,lambda_H_G,lambda_H_C,lambda_Gloss,G
     results['lambda_H_C'] = lambda_H_C
     return results
 
-def run_one(variable_name, variable_range):
+def run_one(variable_name, variable_range, output_dir):
     testing_runs = ['HNMF','SCoNE','CoNE']#['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)','RGWAS','MVBC']
     tuning_runs = ['SCoNE']# ,'SCoNE(Fro)','MVBC']
     all_testing_results = []
-    all_tuning_results = []
-    print(variable_range)
     cfgs = []
     for variable in variable_range:
-        print(f'{variable_name}_{variable}',flush=True)
         # SIMUALTE DATA 
-        sim_kwargs = {"n":500,"M_C":20,"num_genes":20,"noise":2,"ZU_weight": 0.5,"sparsity":0,"rho":1,"seed":0} 
+        sim_kwargs = {"n":500,"M_C":20,"num_genes":20,"noise":0.5,"ZU_weight": 0.5,"sparsity":0,"rho":1,"seed":0} 
         sim_kwargs[variable_name] = variable
         sim = simulate_views(**sim_kwargs) 
         # write G,C,Z to paths
@@ -190,10 +199,7 @@ def run_one(variable_name, variable_range):
         np.save(f'{tmp_folder}/C_{variable_name}_{variable}',sim["C"])
         np.save(f'{tmp_folder}/Z_{variable_name}_{variable}',sim["Z"])
         # TUNING
-        lambda_options = [1e-4,1e-3,1e-2,1,10,100]  
-        lambda_combos = product(lambda_options,lambda_options,lambda_options)
-        #for init in range(10): TODO: add back
-        # for lambda_W, lambda_H_G, lambda_H_C in lambda_combos: TODO: change back
+        lambda_options = [0,1e-6,1e-5,1e-4,1e-3,1e-2,1e-1,1,10,100]  # TODO: if I ever want to do product (combos) this will become redundant
         for lambda_val in lambda_options:
             for run_name in tuning_runs:
                 algorithm_kwargs = {"run_name":run_name,"G":sim["G"] if not 'C-' in run_name else None,
@@ -202,67 +208,76 @@ def run_one(variable_name, variable_range):
                                 "lambda_W":lambda_val,"lambda_H_G":lambda_val,"lambda_H_C":lambda_val,"lambda_Gloss":1,
                                 "G_loss_type":None if 'C-' in run_name else('fro' if 'Fro' in run_name else 'kl_div'),
                                 "C_loss_type":None if 'G-' in run_name else('fro' if 'Fro' in run_name else 'kl_div'),
-                                "sim":sim,"rank":3,"init_name":None, # TODO: change back
+                                "sim":sim,"rank":3,"init_name":None, "num_init":10,
                                 "G_path":f'{tmp_folder}/G_{variable_name}_{variable}.npy',
                                 "C_path":f'{tmp_folder}/C_{variable_name}_{variable}.npy',
-                                "Z_path":f'{tmp_folder}/Z_{variable_name}_{variable}.npy',"variable_name":variable_name,"variable":variable}
+                                "Z_path":f'{tmp_folder}/Z_{variable_name}_{variable}.npy',"variable_name":variable_name,"variable":variable,"write":True}
                 cfgs.append(algorithm_kwargs)
     with ProcessPoolExecutor() as pool:
         results_list = list(pool.map(_call_kwargs, cfgs))
     tuning_results = pd.concat(results_list, ignore_index=True)
-    all_tuning_results.append(tuning_results)
     idx = tuning_results.groupby(['run_name'])["tuning_loss"].idxmin()
     best = (
         tuning_results.loc[idx, tuning_results.columns]
         .reset_index(drop=True)
     )
-    all_tuning_results = pd.concat(all_tuning_results)
-    return all_tuning_results
-    
-    #     # testing set
-    #     print('starting with test set',flush=True)
-    #     sim_kwargs = {"n":500,"M_C":20,"num_genes":20,"noise":2,"ZU_weight": 0.5,"sparsity":0,"rho":1,"seed":1} 
-    #     sim_kwargs[variable_name] = variable
-    #     sim = simulate_views(**sim_kwargs) 
-    #     # write G,C,Z to paths
-    #     np.save(f'{tmp_folder}/G_{variable_name}_{variable}',sim["G"])
-    #     np.save(f'{tmp_folder}/C_{variable_name}_{variable}',sim["C"])
-    #     np.save(f'{tmp_folder}/Z_{variable_name}_{variable}',sim["Z"])
-    #     cfgs = []
-    #     for init in range(10):
-    #         for run_name in testing_runs:
-    #             if run_name in tuning_runs:
-    #                 assert best[(best['run_name']==run_name)].shape[0] == 1
-    #                 lambda_W, lambda_H_G, lambda_H_C = best[(best['run_name']==run_name)][['lambda_W','lambda_H_G','lambda_H_C']].values[0].tolist()
-    #             else:
-    #                 lambda_W, lambda_H_G, lambda_H_C = (0,0,0)
-    #             cfgs.append({"run_name":run_name,"G":sim["G"] if not 'C-' in run_name else None,
-    #                             "C":sim["C"] if not 'G-' in run_name else None,
-    #                             "Z":sim["Z"] if not 'NMF' in run_name else np.zeros((sim["Z"].shape[0],sim["Z"].shape[1])),
-    #                             "lambda_W":lambda_W,"lambda_H_G":lambda_H_G,"lambda_H_C":lambda_H_C,"lambda_Gloss":1,
-    #                             "G_loss_type":None if 'C-' in run_name else('fro' if 'Fro' in run_name else 'kl_div'),
-    #                             "C_loss_type":None if 'G-' in run_name else('fro' if 'Fro' in run_name else 'kl_div'),
-    #                             "sim":sim,"rank":3,"init_name":init,
-    #                             "G_path":f'{tmp_folder}/G_{variable_name}_{variable}.npy',
-    #                             "C_path":f'{tmp_folder}/C_{variable_name}_{variable}.npy',
-    #                             "Z_path":f'{tmp_folder}/Z_{variable_name}_{variable}.npy',"variable_name":variable_name,"variable":variable})
-    #     with ProcessPoolExecutor() as pool:
-    #         results_list = list(pool.map(_call_kwargs, cfgs))
-    #     testing_results = pd.concat(results_list, ignore_index=True)
-    #     all_testing_results.append(testing_results)
 
+    for variable in variable_range:
+        # testing set
+        sim_kwargs = {"n":500,"M_C":20,"num_genes":20,"noise":0.5,"ZU_weight": 0.5,"sparsity":0,"rho":1,"seed":1} 
+        sim_kwargs[variable_name] = variable
+        sim = simulate_views(**sim_kwargs) 
+        
+        # write G,C,Z to paths
+        np.save(f'{tmp_folder}/G_{variable_name}_{variable}',sim["G"])
+        np.save(f'{tmp_folder}/C_{variable_name}_{variable}',sim["C"])
+        np.save(f'{tmp_folder}/Z_{variable_name}_{variable}',sim["Z"])
+        cfgs = []
+        for init in range(10):
+            for run_name in testing_runs:
+                if run_name in tuning_runs:
+                    assert best[(best['run_name']==run_name)].shape[0] == 1
+                    lambda_val = best[(best['run_name']==run_name)]['lambda_H_G'].values[0].tolist()
+                else:
+                    lambda_val = 0
+                cfgs.append({"run_name":run_name,"G":sim["G"] if not 'C-' in run_name else None,
+                                "C":sim["C"] if not 'G-' in run_name else None,
+                                "Z":sim["Z"] if not 'NMF' in run_name else np.zeros((sim["Z"].shape[0],sim["Z"].shape[1])),
+                                "lambda_W":lambda_val,"lambda_H_G":lambda_val,"lambda_H_C":lambda_val,"lambda_Gloss":1,
+                                "G_loss_type":None if 'C-' in run_name else('fro' if 'Fro' in run_name else 'kl_div'),
+                                "C_loss_type":None if 'G-' in run_name else('fro' if 'Fro' in run_name else 'kl_div'),
+                                "sim":sim,"rank":3,"init_name":init,"num_init":1,
+                                "G_path":f'{tmp_folder}/G_{variable_name}_{variable}.npy',
+                                "C_path":f'{tmp_folder}/C_{variable_name}_{variable}.npy',
+                                "Z_path":f'{tmp_folder}/Z_{variable_name}_{variable}.npy',"variable_name":variable_name,"variable":variable})
+        with ProcessPoolExecutor() as pool:
+            results_list = list(pool.map(_call_kwargs, cfgs))
+        testing_results = pd.concat(results_list, ignore_index=True)
+        all_testing_results.append(testing_results)
 
-    # all_testing_results = pd.concat(all_testing_results)
-    # all_tuning_results = pd.concat(all_tuning_results)
-    # summary = (
-    #     all_testing_results.groupby(["run_name", "factor_matrix", variable_name])["sim"]
-    #         .agg(n='count', mean='mean', std='std').reset_index()
-    # )
-    # summary["ci95"] = 1.96 * summary["std"] / np.sqrt(summary["n"])         # normal approx 95% CI
-    # summary["ymin"] = summary["mean"] - summary["ci95"]
-    # summary["ymax"] = summary["mean"] + summary["ci95"]
+    all_testing_results = pd.concat(all_testing_results)
+    summary_sim = (
+        all_testing_results.groupby(["run_name", "lambda_H_G", "factor_matrix", variable_name])["sim"]
+            .agg(n='count', mean='mean', std='std').reset_index()
+    )
+    summary_sim["ci95"] = 1.96 * summary_sim["std"] / np.sqrt(summary_sim["n"])         # normal approx 95% CI
+    summary_sim["ymin"] = summary_sim["mean"] - summary_sim["ci95"]
+    summary_sim["ymax"] = summary_sim["mean"] + summary_sim["ci95"]
 
-    # return summary,all_testing_results,all_tuning_results
+    summary_relerror = (
+        all_testing_results.groupby(["run_name", "lambda_H_G", "factor_matrix", variable_name])["rel_error"]
+            .agg(n='count', mean='mean', std='std').reset_index()
+    )
+    summary_relerror["ci95"] = 1.96 * summary_relerror["std"] / np.sqrt(summary_relerror["n"])         # normal approx 95% CI
+    summary_relerror["ymin"] = summary_relerror["mean"] - summary_relerror["ci95"]
+    summary_relerror["ymax"] = summary_relerror["mean"] + summary_relerror["ci95"]
+
+    summary_sim.to_csv(f'{output_dir}/{variable_name}_summary_sim.csv')
+    summary_relerror.to_csv(f'{output_dir}/{variable_name}_summary_rel_error.csv')
+    all_testing_results.to_csv(f'{output_dir}/{variable_name}_all_testing_results.csv')
+    tuning_results.to_csv(f'{output_dir}/{variable_name}_tuning_results.csv')
+
+    return summary_sim,summary_relerror,all_testing_results,tuning_results
 
 # # ASSESS RUNS OVER CORRELATION
 # summary,all_testing_results = run_one("rho", np.arange(0,1.1,0.1))
@@ -280,7 +295,4 @@ def run_one(variable_name, variable_range):
 # all_testing_results.to_csv(f'{root_dir}/output/noise_all_testing_results.csv')
 
 # ASSESS RUNS OVER SPARSITY
-all_tuning_results = run_one("sparsity",  np.arange(0,1,0.1))
-# summary.to_csv(f'{root_dir}/output/sparsity_summary.csv')
-# all_testing_results.to_csv(f'{root_dir}/output/sparsity_all_testing_results.csv')
-all_tuning_results.to_csv(f'{root_dir}/output/sparsity_all_tuning_results.csv')
+summary_sim,summary_relerror,all_testing_results,tuning_results = run_one("sparsity",  [0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9], output_dir=f'{root_dir}/output')

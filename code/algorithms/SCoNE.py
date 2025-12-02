@@ -18,6 +18,9 @@ def l1_norm(x):
     else:
         return 0
 
+def l2_norm_squared(x):
+    return np.sum(x * x, dtype=np.float64)
+
 def compute_jac(sample_matrix, X, X_hat, loss_type, for_W=False):
     '''
     This function works to compute the Jacobian (unflattened) given loss type in  'kl_div', 'fro'
@@ -48,7 +51,7 @@ def get_X_hat(W,H,Z,U,loss_type):
     else: assert True == False, f"{loss_type} not a valid loss type, should be one of 'kl_div', 'fro'"
     return X_hat
 
-def total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type):
+def total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, alpha, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type):
     # define nec. elements
     if G_loss_type is not None:
         G_hat = get_X_hat(W,H_G,Z,U_G,G_loss_type)
@@ -59,15 +62,16 @@ def total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C,
         C_loss = compute_loss(C,C_hat,loss_type=C_loss_type)
     else: C_loss = 0
 
-    regularization = lambda_W*l1_norm(W) +  lambda_H_G*l1_norm(H_G) +  lambda_H_C*l1_norm(H_C) # l1 reg.
+    l2_regularization = alpha*l2_norm_squared(W)
+    l1_regularization = lambda_H_G*l1_norm(H_G) +  lambda_H_C*l1_norm(H_C) # l1 reg.
 
     if G_loss < 0: assert True == False, f"G_loss with loss type {G_loss_type} negative"
     if C_loss < 0: assert True == False, f"C_loss with loss type {C_loss_type} negative"
-    loss = lambda_Gloss*G_loss + C_loss + regularization
-    return loss, lambda_Gloss*G_loss, C_loss, regularization
+    loss = lambda_Gloss*G_loss + C_loss + l2_regularization + l1_regularization
+    return loss, lambda_Gloss*G_loss, C_loss, l2_regularization, l1_regularization
 
 
-def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type):
+def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, alpha, G_loss_type, C_loss_type):
     # Precompute terms independent of W
     def _forwardG(x):
         W = x.reshape(shape, order='F')
@@ -78,6 +82,8 @@ def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, 
         C_hat = get_X_hat(W,H_C,Z,U_C,C_loss_type)
         return C_hat
     def f(x):
+        W = x.reshape(shape, order='F')
+        
         if G_loss_type is not None:
             G_hat = _forwardG(x)
             G_loss = compute_loss(G,G_hat,G_loss_type)
@@ -90,10 +96,12 @@ def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, 
         else:
             C_loss = 0
         # compute fun
-        loss = lambda_Gloss*G_loss + C_loss
+        loss = lambda_Gloss*G_loss + C_loss + (alpha / 2)*l2_norm_squared(W) # last term adds L2 norm on W
         return loss
 
     def g(x):
+        W = x.reshape(shape, order='F')
+
         if G_loss_type is not None:
             G_hat = _forwardG(x)
             # compute jac
@@ -109,7 +117,7 @@ def make_fg_W(shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, 
             GW_wrt_C = np.zeros((W.shape[0],W.shape[1]))
 
 
-        GW = (lambda_Gloss*GW_wrt_G + GW_wrt_C)
+        GW = (lambda_Gloss*GW_wrt_G + GW_wrt_C + alpha*W) # last term is gradient of L2 norm
         return GW.flatten(order='F')
 
     return f,g
@@ -281,7 +289,7 @@ def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, l1=
 def alternating_opt(
     G,C,Z,              # true matrices
     rank, num_init, # init: number of initializations (will choose one with best loss as final result), should have this=1 when test=True
-    lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss,                  # regularization parameters
+    alpha,lambda_H_G, lambda_H_C, lambda_Gloss,                  # regularization parameters
     G_loss_type, C_loss_type, # in 'kl_div',  'fro' or None (None indicates not fitting to data, i.e. if G_loss_type=None & C_loss_type='fro then C only optimization)
     max_inner=50, # options for pgd_armijo
     rho=0.1, # options for pgd_armijo (n shrink factor)
@@ -289,7 +297,7 @@ def alternating_opt(
     inner_ftol=1e-5, # options for pgd_armijo (stopping criteria for ftol)
     max_outer=200,
     min_outer=5,
-    tol=1e-6,
+    tol=1e-6,post_hoc_rescale=False,
     # if test is True, W is the only factor matrix that will be optimized (for train/test split)
     test=False,
     H_G=None, H_C=None, U_G=None, U_C=None
@@ -305,8 +313,8 @@ def alternating_opt(
         x0 = X.flatten(order='F') 
 
         if name == "W":
-            f,g = make_fg_W(W.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type)
-            l1 = lambda_W
+            f,g = make_fg_W(W.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, alpha, G_loss_type, C_loss_type)
+            l1 = 0
         elif name == "H_G":
             f,g = make_fg_HG(H_G.shape, G, C, Z, W, H_G, H_C, U_G, U_C, lambda_Gloss, G_loss_type, C_loss_type)
             l1 = lambda_H_G
@@ -329,6 +337,8 @@ def alternating_opt(
     for run in range(num_init):
         # initialize factor matrices
         W = np.random.uniform(low=0.1,high=1,size=(N, rank))
+        col_norms = np.linalg.norm(W, axis=0)  # shape (rank,), as suggeted by Kim and Park 2007
+        W = W / col_norms
         if not test:
             if G is not None:
                 H_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], rank))
@@ -345,7 +355,7 @@ def alternating_opt(
 
         # initial objective
         loss_dict = defaultdict(list)
-        f_prev, G_loss, C_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
+        f_prev, G_loss, C_loss, l2_regularization, l1_regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, alpha, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
 
         for _ in range(max_outer):
             W   = one_block_update("W", W)
@@ -356,12 +366,13 @@ def alternating_opt(
                 H_C = one_block_update("H_C", H_C)
                 U_C = one_block_update("U_C", U_C)
 
-            f_cur, G_loss, C_loss, regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, lambda_W, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
+            f_cur, G_loss, C_loss, l2_regularization, l1_regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, alpha, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
             loss_dict['total_loss'].append(f_cur)
             loss_dict['G_loss'].append(G_loss)
             loss_dict['C_loss'].append(C_loss)
             loss_dict['G_plus_C_loss'].append(G_loss+C_loss)
-            loss_dict['regularization'].append(regularization)
+            loss_dict['l2_regularization'].append(l2_regularization)
+            loss_dict['l1_regularization'].append(l1_regularization)
             
             # record matrix norms
             loss_dict['W_norm'].append(np.linalg.norm(W))
@@ -389,9 +400,12 @@ def alternating_opt(
             best_total_loss = f_cur # reset
             final_loss_dict = loss_dict
             if not test:
-                # Normalize columns of W to L2 norm and scale rows of H to resolve scaling ambiguity
-                norms = np.linalg.norm(W, axis=0)
-                norms[norms == 0] = 1.0
+                if post_hoc_rescale is True:
+                    # Normalize columns of W to L2 norm and scale rows of H to resolve scaling ambiguity
+                    norms = np.linalg.norm(W, axis=0)
+                    norms[norms == 0] = 1.0
+                else:
+                    norms = np.ones(W.shape[1], dtype=W.dtype)
                 W_normed = W / norms
                 final_factor_matrices = {"W":W_normed}
                 # scale rows of H_G and H_C
