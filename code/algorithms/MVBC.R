@@ -67,8 +67,8 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
   # compute loss as sum over len(rank)
   factor_matrices <- list(W = W)
   mean_weights <- colSums(W)[seq_len(length(G_plus_C_loss))]
-  loss_history <- list(G_plus_C_loss=sum(unlist(G_plus_C_loss) * mean_weights) / sum(mean_weights),
-                       total_loss=sum(unlist(total_loss) * mean_weights) / sum(mean_weights))
+  loss_history <- list(G_plus_C_loss=sum(unlist(G_plus_C_loss) * mean_weights),
+                       total_loss=sum(unlist(total_loss) * mean_weights))
   output <- list(factor_matrices = factor_matrices,loss_history = loss_history)
   cat(toJSON(output, auto_unbox = TRUE))
 }
