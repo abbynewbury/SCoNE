@@ -1,6 +1,8 @@
 import numpy as np
 from collections import defaultdict
 from scipy.special import xlogy
+from joblib import Parallel, delayed
+
 
 def compute_loss(X,X_hat,loss_type):
     if loss_type == 'kl_div':
@@ -291,7 +293,7 @@ def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, l1=
 
 def alternating_opt(
     G,C,Z,              # true matrices
-    rank, num_init, # init: number of initializations (will choose one with best loss as final result), should have this=1 when test=True
+    rank,
     alpha,lambda_H_G, lambda_H_C, lambda_Gloss,                  # regularization parameters
     G_loss_type, C_loss_type, # in 'kl_div',  'fro' or None (None indicates not fitting to data, i.e. if G_loss_type=None & C_loss_type='fro then C only optimization)
     max_inner=50, # options for pgd_armijo
@@ -335,102 +337,137 @@ def alternating_opt(
         x = pgd_armijo(f, g, x0, max_iter=max_inner, rho=rho, sigma=sigma, ftol=inner_ftol, l1=l1)
         return x.reshape(X.shape, order='F')
 
-    best_total_loss = np.inf
     N = G.shape[0] if G is not None else C.shape[0]
-    for run in range(num_init):
-        # initialize factor matrices
-        W = np.random.uniform(low=0.1,high=1,size=(N, rank))
-        col_norms = np.linalg.norm(W, axis=0)  # shape (rank,), as suggeted by Kim and Park 2007
-        W = W / col_norms
-        if not test:
-            if G is not None:
-                H_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], rank))
-                if Z is not None:
-                    U_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], Z.shape[1]))
-                else: U_G = None
-            else:
-                H_G = None
-                U_G = None
-            if C is not None:
-                H_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], rank)) 
-                if Z is not None:
-                    U_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], Z.shape[1]))
-                else: U_C = None
-            else:
-                H_C = None
-                U_C = None
 
-        # initial objective
-        loss_dict = defaultdict(list)
-        f_prev, G_loss, C_loss, l2_regularization, l1_regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, alpha, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
-        for _ in range(max_outer):
-            W   = one_block_update("W", W)
-            if G_loss_type is not None and not test:
-                H_G = one_block_update("H_G", H_G)
-                if Z is not None:
-                    U_G = one_block_update("U_G", U_G)
-            if C_loss_type is not None and not test:
-                H_C = one_block_update("H_C", H_C)
-                if Z is not None:
-                    U_C = one_block_update("U_C", U_C)
+    # initialize factor matrices
+    W = np.random.uniform(low=0.1,high=1,size=(N, rank))
+    col_norms = np.linalg.norm(W, axis=0)  # shape (rank,), as suggeted by Kim and Park 2007
+    W = W / col_norms
+    if not test:
+        if G is not None:
+            H_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], rank))
+            if Z is not None:
+                U_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], Z.shape[1]))
+            else: U_G = None
+        else:
+            H_G = None
+            U_G = None
+        if C is not None:
+            H_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], rank)) 
+            if Z is not None:
+                U_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], Z.shape[1]))
+            else: U_C = None
+        else:
+            H_C = None
+            U_C = None
 
-            f_cur, G_loss, C_loss, l2_regularization, l1_regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, alpha, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
-            loss_dict['total_loss'].append(f_cur)
-            loss_dict['G_loss'].append(G_loss)
-            loss_dict['C_loss'].append(C_loss)
-            loss_dict['G_plus_C_loss'].append(G_loss+C_loss)
-            loss_dict['l2_regularization'].append(l2_regularization)
-            loss_dict['l1_regularization'].append(l1_regularization)
-            
-            # record matrix norms
-            loss_dict['W_norm'].append(np.linalg.norm(W))
-            if G_loss_type is not None:
-                loss_dict['H_G_norm'].append(np.linalg.norm(H_G))
-                if Z is not None:
-                    loss_dict['U_G_norm'].append(np.linalg.norm(U_G))
-            if C_loss_type is not None:
-                loss_dict['H_C_norm'].append(np.linalg.norm(H_C))
-                if Z is not None:
-                    loss_dict['U_C_norm'].append(np.linalg.norm(U_C))
+    # initial objective
+    loss_dict = defaultdict(list)
+    f_prev, G_loss, C_loss, l2_regularization, l1_regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, alpha, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
+    for _ in range(max_outer):
+        W   = one_block_update("W", W)
+        if G_loss_type is not None and not test:
+            H_G = one_block_update("H_G", H_G)
+            if Z is not None:
+                U_G = one_block_update("U_G", U_G)
+        if C_loss_type is not None and not test:
+            H_C = one_block_update("H_C", H_C)
+            if Z is not None:
+                U_C = one_block_update("U_C", U_C)
 
-            # record sparsity
-            loss_dict['W_sparsity'].append(100*np.count_nonzero(W == 0)/ W.size)
-            if G_loss_type is not None:
-                loss_dict['H_G_sparsity'].append(100*np.count_nonzero(H_G == 0)/ H_G.size)
-                if Z is not None:
-                    loss_dict['U_G_sparsity'].append(100*np.count_nonzero(U_G == 0)/ U_G.size)
-            if C_loss_type is not None:
-                loss_dict['H_C_sparsity'].append(100*np.count_nonzero(H_C == 0)/ H_C.size)
-                if Z is not None:
-                    loss_dict['U_C_sparsity'].append(100*np.count_nonzero(U_C == 0)/ U_C.size)
-            #assert f_cur<=f_prev*(1+0.1), f"loss increasing (by more than 10% x previous loss): {f_prev} -> {f_cur}"
-            if ((f_prev - f_cur) / max(1.0, abs(f_prev)) < tol) and _ >= min_outer:
-                break
-            f_prev = f_cur
+        f_cur, G_loss, C_loss, l2_regularization, l1_regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, alpha, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
+        loss_dict['total_loss'].append(f_cur)
+        loss_dict['G_loss'].append(G_loss)
+        loss_dict['C_loss'].append(C_loss)
+        loss_dict['G_plus_C_loss'].append(G_loss+C_loss)
+        loss_dict['l2_regularization'].append(l2_regularization)
+        loss_dict['l1_regularization'].append(l1_regularization)
+        
+        # record matrix norms
+        loss_dict['W_norm'].append(np.linalg.norm(W))
+        if G_loss_type is not None:
+            loss_dict['H_G_norm'].append(np.linalg.norm(H_G))
+            if Z is not None:
+                loss_dict['U_G_norm'].append(np.linalg.norm(U_G))
+        if C_loss_type is not None:
+            loss_dict['H_C_norm'].append(np.linalg.norm(H_C))
+            if Z is not None:
+                loss_dict['U_C_norm'].append(np.linalg.norm(U_C))
 
-        if f_cur < best_total_loss:
-            best_total_loss = f_cur # reset
-            final_loss_dict = loss_dict
-            if not test:
-                if post_hoc_rescale is True:
-                    # Normalize columns of W to L2 norm and scale rows of H to resolve scaling ambiguity
-                    norms = np.linalg.norm(W, axis=0)
-                    norms[norms == 0] = 1.0
-                else:
-                    norms = np.ones(W.shape[1], dtype=W.dtype)
-                W_normed = W / norms
-                final_factor_matrices = {"W":W_normed}
-                # scale rows of H_G and H_C
-                if G_loss_type is not None:
-                    H_G_normed = H_G * norms[np.newaxis, :]
-                    final_factor_matrices["H_G"] = H_G_normed
-                    if Z is not None:
-                        final_factor_matrices["U_G"] = U_G
-                if C_loss_type is not None:
-                    H_C_normed = H_C * norms[np.newaxis, :]
-                    final_factor_matrices["H_C"] = H_C_normed
-                    if Z is not None:
-                        final_factor_matrices["U_C"] = U_C
-            else:
-                final_factor_matrices = {"W":W}
+        # record sparsity
+        loss_dict['W_sparsity'].append(100*np.count_nonzero(W == 0)/ W.size)
+        if G_loss_type is not None:
+            loss_dict['H_G_sparsity'].append(100*np.count_nonzero(H_G == 0)/ H_G.size)
+            if Z is not None:
+                loss_dict['U_G_sparsity'].append(100*np.count_nonzero(U_G == 0)/ U_G.size)
+        if C_loss_type is not None:
+            loss_dict['H_C_sparsity'].append(100*np.count_nonzero(H_C == 0)/ H_C.size)
+            if Z is not None:
+                loss_dict['U_C_sparsity'].append(100*np.count_nonzero(U_C == 0)/ U_C.size)
+        #assert f_cur<=f_prev*(1+0.1), f"loss increasing (by more than 10% x previous loss): {f_prev} -> {f_cur}"
+        if ((f_prev - f_cur) / max(1.0, abs(f_prev)) < tol) and _ >= min_outer:
+            break
+        f_prev = f_cur
+
+    if not test:
+        if post_hoc_rescale is True:
+            # Normalize columns of W to L2 norm and scale rows of H to resolve scaling ambiguity
+            norms = np.linalg.norm(W, axis=0)
+            norms[norms == 0] = 1.0
+        else:
+            norms = np.ones(W.shape[1], dtype=W.dtype)
+        W_normed = W / norms
+        factor_matrices = {"W":W_normed}
+        # scale rows of H_G and H_C
+        if G_loss_type is not None:
+            H_G_normed = H_G * norms[np.newaxis, :]
+            factor_matrices["H_G"] = H_G_normed
+            if Z is not None:
+                factor_matrices["U_G"] = U_G
+        if C_loss_type is not None:
+            H_C_normed = H_C * norms[np.newaxis, :]
+            factor_matrices["H_C"] = H_C_normed
+            if Z is not None:
+                factor_matrices["U_C"] = U_C
+    else:
+            factor_matrices = {"W":W}
+
+    return factor_matrices, loss_dict
+
+def SCoNE_parallel(
+    G,C,Z,              # true matrices
+    rank, num_init, # init: number of initializations (will choose one with best loss as final result), should have this=1 when test=True
+    alpha,lambda_H_G, lambda_H_C, lambda_Gloss,                  # regularization parameters
+    G_loss_type, C_loss_type, # in 'kl_div',  'fro' or None (None indicates not fitting to data, i.e. if G_loss_type=None & C_loss_type='fro then C only optimization)
+    max_inner=50, # options for pgd_armijo
+    rho=0.1, # options for pgd_armijo (n shrink factor)
+    sigma=1e-4, # options for pgd_armijo (Armijo constant)
+    inner_ftol=1e-5, # options for pgd_armijo (stopping criteria for ftol)
+    max_outer=200,
+    min_outer=5,
+    tol=1e-6,post_hoc_rescale=False,
+    # if test is True, W is the only factor matrix that will be optimized (for train/test split)
+    test=False,
+    H_G=None, H_C=None, U_G=None, U_C=None):
+
+    results = Parallel(n_jobs=-1, prefer="processes")(
+        delayed(alternating_opt)(
+        **{"G":G,"C":C,"Z":Z,              # true matrices
+        "rank":rank, # init: number of initializations (will choose one with best loss as final result), should have this=1 when test=True
+        "alpha":alpha,"lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C, "lambda_Gloss":lambda_Gloss,                  # regularization parameters
+        "G_loss_type":G_loss_type, "C_loss_type":C_loss_type, # in 'kl_div',  'fro' or None (None indicates not fitting to data, i.e. if G_loss_type=None & C_loss_type='fro then C only optimization)
+        "max_inner":max_inner, # options for pgd_armijo
+        "rho":rho, # options for pgd_armijo (n shrink factor)
+        "sigma":sigma, # options for pgd_armijo (Armijo constant)
+        "inner_ftol":inner_ftol, # options for pgd_armijo (stopping criteria for ftol)
+        "max_outer":max_outer,
+        "min_outer":min_outer,
+        "tol":tol,"post_hoc_rescale":post_hoc_rescale,
+        "test":test,
+        "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C}) for run in range(num_init))
+    
+    final_factor_matrices, final_loss_dict = min(
+        results,
+        key=lambda x: x[1]["total_loss"][-1]
+    )
     return final_factor_matrices, final_loss_dict
