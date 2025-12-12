@@ -43,7 +43,10 @@ def compute_jac(sample_matrix, X, X_hat, loss_type, for_W=False):
     return GX
 
 def get_X_hat(W,H,Z,U,loss_type):
-    X_hat = W@H.T + Z@U.T
+    if Z is not None:
+        X_hat = W@H.T + Z@U.T
+    else:
+        X_hat = W@H.T
     if loss_type in ['kl_div','fro']:
         X_hat = np.clip(X_hat, 1e-9, np.inf) # clipping for log purposes
     elif loss_type is None:
@@ -342,13 +345,17 @@ def alternating_opt(
         if not test:
             if G is not None:
                 H_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], rank))
-                U_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], Z.shape[1]))
+                if Z is not None:
+                    U_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], Z.shape[1]))
+                else: U_G = None
             else:
                 H_G = None
                 U_G = None
             if C is not None:
                 H_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], rank)) 
-                U_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], Z.shape[1]))
+                if Z is not None:
+                    U_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], Z.shape[1]))
+                else: U_C = None
             else:
                 H_C = None
                 U_C = None
@@ -356,15 +363,16 @@ def alternating_opt(
         # initial objective
         loss_dict = defaultdict(list)
         f_prev, G_loss, C_loss, l2_regularization, l1_regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, alpha, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
-
         for _ in range(max_outer):
             W   = one_block_update("W", W)
             if G_loss_type is not None and not test:
                 H_G = one_block_update("H_G", H_G)
-                U_G = one_block_update("U_G", U_G)
+                if Z is not None:
+                    U_G = one_block_update("U_G", U_G)
             if C_loss_type is not None and not test:
                 H_C = one_block_update("H_C", H_C)
-                U_C = one_block_update("U_C", U_C)
+                if Z is not None:
+                    U_C = one_block_update("U_C", U_C)
 
             f_cur, G_loss, C_loss, l2_regularization, l1_regularization = total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, alpha, lambda_H_G, lambda_H_C, lambda_Gloss, G_loss_type, C_loss_type)
             loss_dict['total_loss'].append(f_cur)
@@ -378,19 +386,23 @@ def alternating_opt(
             loss_dict['W_norm'].append(np.linalg.norm(W))
             if G_loss_type is not None:
                 loss_dict['H_G_norm'].append(np.linalg.norm(H_G))
-                loss_dict['U_G_norm'].append(np.linalg.norm(U_G))
+                if Z is not None:
+                    loss_dict['U_G_norm'].append(np.linalg.norm(U_G))
             if C_loss_type is not None:
                 loss_dict['H_C_norm'].append(np.linalg.norm(H_C))
-                loss_dict['U_C_norm'].append(np.linalg.norm(U_C))
+                if Z is not None:
+                    loss_dict['U_C_norm'].append(np.linalg.norm(U_C))
 
             # record sparsity
             loss_dict['W_sparsity'].append(100*np.count_nonzero(W == 0)/ W.size)
             if G_loss_type is not None:
                 loss_dict['H_G_sparsity'].append(100*np.count_nonzero(H_G == 0)/ H_G.size)
-                loss_dict['U_G_sparsity'].append(100*np.count_nonzero(U_G == 0)/ U_G.size)
+                if Z is not None:
+                    loss_dict['U_G_sparsity'].append(100*np.count_nonzero(U_G == 0)/ U_G.size)
             if C_loss_type is not None:
                 loss_dict['H_C_sparsity'].append(100*np.count_nonzero(H_C == 0)/ H_C.size)
-                loss_dict['U_C_sparsity'].append(100*np.count_nonzero(U_C == 0)/ U_C.size)
+                if Z is not None:
+                    loss_dict['U_C_sparsity'].append(100*np.count_nonzero(U_C == 0)/ U_C.size)
             #assert f_cur<=f_prev*(1+0.1), f"loss increasing (by more than 10% x previous loss): {f_prev} -> {f_cur}"
             if ((f_prev - f_cur) / max(1.0, abs(f_prev)) < tol) and _ >= min_outer:
                 break
@@ -412,11 +424,13 @@ def alternating_opt(
                 if G_loss_type is not None:
                     H_G_normed = H_G * norms[np.newaxis, :]
                     final_factor_matrices["H_G"] = H_G_normed
-                    final_factor_matrices["U_G"] = U_G
+                    if Z is not None:
+                        final_factor_matrices["U_G"] = U_G
                 if C_loss_type is not None:
                     H_C_normed = H_C * norms[np.newaxis, :]
                     final_factor_matrices["H_C"] = H_C_normed
-                    final_factor_matrices["U_C"] = U_C
+                    if Z is not None:
+                        final_factor_matrices["U_C"] = U_C
             else:
                 final_factor_matrices = {"W":W}
     return final_factor_matrices, final_loss_dict
