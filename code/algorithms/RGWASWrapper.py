@@ -1,5 +1,4 @@
 # python wrapper for RGWAS
-import simulations.genomes1000_sim as sim_functions
 import numpy as np
 import subprocess
 import json

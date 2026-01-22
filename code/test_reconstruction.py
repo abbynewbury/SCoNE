@@ -21,7 +21,6 @@ import sys
 import json
 from sklearn.model_selection import train_test_split
 
-
 colors_dict = {
 "SCoNE":"#2f4b7c",
 "MVBC":"#665191",
@@ -45,97 +44,9 @@ import algorithms.SCoNE as SCoNE
 import algorithms.MVBCWrapper as MVBCWrapper
 import algorithms.RGWASWrapper as RGWASWrapper
 import evaluation.cluster_evaluation as cluster_evaluation
+import evaluation.reconstruction_evaluation as reconstruction_evaluation
+from simulate_data import *
 
-
-# CODE TO SIMULATE DATA
-def proj_nonneg(x):
-    # If already feasible, return x as-is (avoids an allocation most iterations)
-    if x.min() >= 0:
-        return x
-    return np.maximum(x, 0)
-
-def make_correlated_matrices(m, r, rho, seed=1):
-    rng = np.random.default_rng(seed)
-    Z = proj_nonneg(rng.normal(size=(m, r)))
-    E = proj_nonneg(rng.normal(size=(m, r)))
-    W1 = Z
-    W2 = rho * Z + np.sqrt(1 - rho**2) * E
-    if rho==1:
-        assert np.allclose(W1, W2)
-    return W1, W2
-
-def simulate_views(n=2500, num_genes=100, M_C=100, M_Z=5, rank=3, seed=0, ZU_weight=1, noise=0, sparsity=0, rho=1):
-    """
-    G:  n x num_genes  (Poisson with rate WH_g.T + ZU_g.T)
-    C:  n x M_C  (Poisson with rate WH_c.T + ZU_c.T)
-
-    Z: n x M_Z covariates (non-negative random numbers)
-
-      W   : n x rank
-      H_g : num_genes x rank
-      U_g : M_Z x num_genes
-      H_c: n x M_C
-      U_c: M_Z x M_C
-    """
-    rng = np.random.default_rng(seed)
-
-    # 1. Sample factor matrices
-    # Sample nonnegative factors so Poisson rates are valid
-    W_C, W_G = make_correlated_matrices(n, rank, rho,seed=seed+1)
-    H_C = proj_nonneg(rng.normal(size=(M_C, rank)))
-    # generate linked markers
-    H_G = proj_nonneg(rng.normal(size=(num_genes, rank)))
-    # generate superpop shift for each feature
-    U_C = proj_nonneg(rng.normal(size=(M_C, M_Z)))
-    U_G =  proj_nonneg(rng.normal(size=(num_genes, M_Z)))
-
-    # generate 5 superpopulations
-    superpops = rng.permutation(n) % M_Z   
-    Z = (superpops[:, None] == np.arange(M_Z)).astype(int) 
-
-    #2. impose sparsity (P(W_ij=0)=sparsity)
-    mask = np.random.rand(*(M_C,rank)) > sparsity
-    H_C = H_C * mask
-    mask = np.random.rand(*(num_genes,rank)) > sparsity
-    H_G = H_G * mask
-
-
-    avg_corr = np.mean([np.corrcoef(W_C[:,k], W_G[:,k])[0,1]
-                    for k in range(W_C.shape[1])])
-
-    
-    # Means
-    M_c = W_C@H_C.T + (ZU_weight)*Z@U_C.T + (noise)*proj_nonneg(rng.normal(size=(n, M_C)))
-    M_g = W_G@H_G.T + (ZU_weight)*Z@U_G.T + (noise)*proj_nonneg(rng.normal(size=(n, num_genes)))
-
-    # Generate the two observed matrices
-    G = rng.poisson(M_g)  
-    C = rng.poisson(M_c)                  
-
-    return {"G": G, "C": C, "Z":Z, "W_C": W_C, "W_G":W_G, "H_G": H_G, "H_C": H_C, "U_G": U_G, "U_C": U_C}
-
-# CODE TO EVALUATE RECONSTRUCTION
-def frobenius_cosine_similarity(A, B):
-    num = np.trace(A.T @ B)
-    den = np.sqrt(np.trace(A.T @ A)) * np.sqrt(np.trace(B.T @ B))
-    return num / den
-
-def kl_rel_error_denom(V):
-    """
-    Denominator used in Hsieh & Dhillon (KDD 2011):
-    I-divergence between V and row-mean baseline Vbar,
-    where each row i has constant value equal to its row mean.
-    """
-    V_safe = V + 1e-12
-    row_means = V.mean(axis=1, keepdims=True) + 1e-12
-    return np.sum(V_safe * np.log(V_safe / row_means))
-
-def best_permutation_similarity(W_true, W_hat):
-    # Compute pairwise column inner products (the numerator terms)
-    M = W_true.T @ W_hat 
-    row_ind, col_ind = linear_sum_assignment(-M) # maximize numerator
-    W_hat_perm = W_hat[:, col_ind] # optimal permutation
-    return frobenius_cosine_similarity(W_true, W_hat_perm)
 
 # CODE TO RUN ALL COMPARISON METHODS (AND PARALLELIZE)
 def _call_kwargs(kw):
@@ -158,7 +69,7 @@ def run_one_wrapper(run_name,G,C,Z,lambda_W,lambda_H_G,lambda_H_C,lambda_Gloss,G
                         "max_inner":50, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4,
                         "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
                         "max_outer":500, "min_outer":5, "tol":1e-6,"post_hoc_rescale":False}
-        factor_matrices, loss_function = SCoNE.alternating_opt(**algorithm_func_kwargs)
+        factor_matrices, loss_function = SCoNE.SCoNE_parallel(**algorithm_func_kwargs)
         if write is True and run_name=='SCoNE': # save so can visualize the loss in tuning over different lambda params
             with open(f"/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno/output/models/loss_function_SCoNE_{variable_name}_{variable}_init_{init_name}.json", "w") as f: # TODO: remove
                 json.dump(loss_function, f)
@@ -166,10 +77,10 @@ def run_one_wrapper(run_name,G,C,Z,lambda_W,lambda_H_G,lambda_H_C,lambda_Gloss,G
         C_loss = loss_function['C_loss'][-1]
         tuning_loss = G_loss + C_loss
         if not 'C-' in run_name:
-            rel_error_G = G_loss/kl_rel_error_denom(G)
+            rel_error_G = G_loss/reconstruction_evaluation.kl_rel_error_denom(G)
         else: rel_error_G = None
         if not 'G-' in run_name:
-            rel_error_C = C_loss/kl_rel_error_denom(C)
+            rel_error_C = C_loss/reconstruction_evaluation.kl_rel_error_denom(C)
         else: rel_error_C = None
 
     elif run_name == 'MVBC':
@@ -193,10 +104,10 @@ def run_one_wrapper(run_name,G,C,Z,lambda_W,lambda_H_G,lambda_H_C,lambda_Gloss,G
     else: assert True == False, f"invalid run name {run_name}"
     for k,v in factor_matrices.items():
         if k=="W":
-            results.append([run_name,"W_C",init_name,best_permutation_similarity(sim["W_C"],v),tuning_loss])
-            results.append([run_name,"W_G",init_name,best_permutation_similarity(sim["W_G"],v),tuning_loss])
+            results.append([run_name,"W_C",init_name,reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v),tuning_loss])
+            results.append([run_name,"W_G",init_name,reconstruction_evaluation.best_permutation_similarity(sim["W_G"],v),tuning_loss])
         else:
-            results.append([run_name,k,init_name,best_permutation_similarity(sim[k],v),tuning_loss])
+            results.append([run_name,k,init_name,reconstruction_evaluation.best_permutation_similarity(sim[k],v),tuning_loss])
     results = pd.DataFrame(results,columns=results_columns)
     results[variable_name] = variable
     results['rel_error_G'] = rel_error_G

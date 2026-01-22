@@ -294,8 +294,8 @@ def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, l1=
 def alternating_opt(
     G,C,Z,              # true matrices
     rank,
-    alpha,lambda_H_G, lambda_H_C, lambda_Gloss,                  # regularization parameters
-    G_loss_type, C_loss_type, # in 'kl_div',  'fro' or None (None indicates not fitting to data, i.e. if G_loss_type=None & C_loss_type='fro then C only optimization)
+    alpha=0,lambda_H_G=0, lambda_H_C=0, lambda_Gloss=1,                  # regularization parameters
+    G_loss_type='kl_div', C_loss_type='kl_div', # in 'kl_div',  'fro' or None (None indicates not fitting to data, i.e. if G_loss_type=None & C_loss_type='fro then C only optimization)
     max_inner=50, # options for pgd_armijo
     rho=0.1, # options for pgd_armijo (n shrink factor)
     sigma=1e-4, # options for pgd_armijo (Armijo constant)
@@ -436,9 +436,9 @@ def alternating_opt(
 
 def SCoNE_parallel(
     G,C,Z,              # true matrices
-    rank, num_init, # init: number of initializations (will choose one with best loss as final result), should have this=1 when test=True
-    alpha,lambda_H_G, lambda_H_C, lambda_Gloss,                  # regularization parameters
-    G_loss_type, C_loss_type, # in 'kl_div',  'fro' or None (None indicates not fitting to data, i.e. if G_loss_type=None & C_loss_type='fro then C only optimization)
+    rank, num_init=1, # init: number of initializations (will choose one with best loss as final result), should have this=1 when test=True
+    alpha=0,lambda_H_G=0, lambda_H_C=0, lambda_Gloss=1,                  # regularization parameters
+    G_loss_type='kl_div', C_loss_type='kl_div', # in 'kl_div',  'fro' or None (None indicates not fitting to data, i.e. if G_loss_type=None & C_loss_type='fro then C only optimization)
     max_inner=50, # options for pgd_armijo
     rho=0.1, # options for pgd_armijo (n shrink factor)
     sigma=1e-4, # options for pgd_armijo (Armijo constant)
