@@ -57,6 +57,10 @@ def deploy_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambda_Glo
             G_loss_type,C_loss_type=('kl_div','kl_div')
             Z=None
         else: G_loss_type,C_loss_type=('kl_div','kl_div')
+        if run_name=='HNMF(res)':
+            C = C - Z @ np.linalg.lstsq(Z, C,rcond=None)[0]
+            G = G - Z @ np.linalg.lstsq(Z, G,rcond=None)[0]
+
         algorithm_func_kwargs={"G":G, "C":C, "Z":Z,"rank":rank, "num_init":num_init, 
                         "alpha":reg_params['alpha'], "lambda_H_G":reg_params['lambda_H_G'], "lambda_H_C":reg_params['lambda_H_C'],"lambda_Gloss":lambda_Gloss,
                         "max_inner":50, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4,
