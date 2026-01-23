@@ -122,7 +122,7 @@ factor_matrices, loss_function = SCoNE_parallel(
 ```
 
 ### RGWAS
-We implement a python wrapper around the R code provided in Dahl et al. "Reverse GWAS: Using genetics to identify and model phenotypic subtypes". r_path should be set to the path to your Rscript. To implement RGWAS, we need to write G, C and Z to numpy files.
+We implement a python wrapper around the R code provided in Dahl et al. "Reverse GWAS: Using genetics to identify and model phenotypic subtypes". r_path should be set to the path to your Rscript. To implement RGWAS, we need to write G, C and Z to numpy or csv (with first column as index name) files.
 
 ```python
 import os
@@ -142,7 +142,7 @@ factor_matrices, loss_function = RGWASWrapper(
 ```
 
 ### MVBC
-We implement a python wrapper around the R code provided in Sun et al. "Multi-view Biclustering for Genotype-Phenotype Association Studies of Complex Diseases". r_path should be set to the path to your Rscript. To implement MVBC, we need to write G, C and Z to numpy files.
+We implement a python wrapper around the R code provided in Sun et al. "Multi-view Biclustering for Genotype-Phenotype Association Studies of Complex Diseases". r_path should be set to the path to your Rscript. To implement MVBC, we need to write G, C and Z to numpy  or csv (with first column as index name) files.
 
 ```python
 from algorithms.MVBCWrapper import MVBCWrapper
