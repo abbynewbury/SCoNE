@@ -5,18 +5,38 @@ library(data.table)
 
 l0 <- function(x) sum(abs(x) > 0)
 
+read_matrix <- function(path, mode = "double") {
+  # if csv: assumes that the first column is index names
+  ext <- tools::file_ext(path)
+
+  if (ext == "csv") {
+    df <- read.csv(path, row.names = 1)
+    vals <- as.vector(as.matrix(df)) # store as vector first since R matrices are column order and npy are row-order
+    storage.mode(vals) <- "double"
+    x <- matrix(vals, nrow = nrow(df), ncol = ncol(df), byrow = TRUE)
+
+  } else if (ext == "npy") {
+    x <- RcppCNPy::npyLoad(path, "integer")
+  } else {
+    stop("Unsupported file type: ", ext)
+  }
+
+  storage.mode(x) <- mode
+  x
+}
+
+
+
 
 run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, maxOuter) {
   lvs <- c(lambda_H_G, lambda_H_C)
   lz  <- lambda_W
 
   # --- Read G ---
-  G <- npyLoad(G_path,"integer")
-  storage.mode(G) <- "double"
+  G <- read_matrix(G_path)
 
   # --- Read C (.npy) ---
-  C <- npyLoad(C_path,"integer")
-  storage.mode(C) <- "double"
+  C <- read_matrix(C_path)
 
   # --- Run MVBC ---
   remaining <- seq_len(nrow(G)) # indices of individuals still under consideration
