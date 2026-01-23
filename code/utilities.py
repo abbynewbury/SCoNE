@@ -5,6 +5,11 @@ import os
 import gc
 from pathlib import Path
 import shutil
+import json
+import pickle
+import algorithms.SCoNE as SCoNE
+import algorithms.MVBCWrapper as MVBCWrapper
+import algorithms.RGWASWrapper as RGWASWrapper
 
 
 # Algorithm comparison functions
@@ -33,3 +38,44 @@ def profile_function(func, *args, mem_target='function', **kwargs):
     else:
         return result, max_mem, cpu_time, user_time
     
+
+def deploy_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambda_Gloss=None,
+                    G_path='',C_path='',Z_path='',r_path='',rank=3,num_init=1):
+
+    if run_name in ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','HNMF(res)','CoNE','SCoNE','SCoNE(Fro)']:
+        if 'SCoNE' not in run_name:
+            reg_params = {'alpha':0,'lambda_H_G':0, 'lambda_H_C':0}
+        # set G and C loss types
+        if 'G-' in run_name: 
+            G_loss_type,C_loss_type=('kl_div',None)
+            C=None
+        elif 'C-' in run_name: 
+            G_loss_type,C_loss_type=(None,'kl_div')
+            G=None
+        elif run_name=='SCoNE(Fro)': G_loss_type,C_loss_type=('fro','fro')
+        elif 'HNMF' in run_name:
+            G_loss_type,C_loss_type=('kl_div','kl_div')
+            Z=None
+        else: G_loss_type,C_loss_type=('kl_div','kl_div')
+        algorithm_func_kwargs={"G":G, "C":C, "Z":Z,"rank":rank, "num_init":num_init, 
+                        "alpha":reg_params['alpha'], "lambda_H_G":reg_params['lambda_H_G'], "lambda_H_C":reg_params['lambda_H_C'],"lambda_Gloss":lambda_Gloss,
+                        "max_inner":50, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4,
+                        "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
+                        "max_outer":500, "min_outer":5, "tol":1e-6,"post_hoc_rescale":False}
+        factor_matrices, loss_function = SCoNE.SCoNE_parallel(**algorithm_func_kwargs)
+
+    elif run_name == 'MVBC':
+        algorithm_func_kwargs = {"G_path":G_path,"C_path":C_path, "rank":rank,
+                    "lambda_W":reg_params['lambda_W'], "lambda_H_G":reg_params['lambda_H_G'], "lambda_H_C":reg_params['lambda_H_C'], "r_path":r_path}
+        factor_matrices, loss_function = MVBCWrapper.MVBCWrapper(**algorithm_func_kwargs)
+
+    elif run_name == 'RGWAS':
+        algorithm_func_kwargs = {"r_path":r_path, "G_path":G_path,
+                        "C_path":C_path, "Z_path":Z_path, "num_init":num_init,"rank":rank}
+        factor_matrices, loss_function = RGWASWrapper.RGWASWrapper(**algorithm_func_kwargs)
+
+    # write factor matrices and loss function to output path
+    with open(f"{out_path}_loss_function.json", "w") as f: # TODO: remove
+        json.dump(loss_function, f)
+    with open(f"{out_path}_factor_matrices.pkl", "wb") as f:
+        pickle.dump(factor_matrices, f)
