@@ -12,11 +12,16 @@ num_init <- as.integer(args[5])
 
 # read in matrices
 read_matrix <- function(path, mode = "double") {
-  # if csv: assumes that the first column is index names
+  # if csv/tsv: assumes that the first column is index names
   ext <- tools::file_ext(path)
 
-  if (ext == "csv") {
-    df <- read.csv(path, row.names = 1)
+  if (ext %in% c("csv", "tsv")) {
+    df <- if (ext == "csv") {
+      read.csv(path, row.names = 1)
+    } else {
+      read.delim(path, row.names = 1)
+    }
+
     vals <- as.vector(as.matrix(df)) # store as vector first since R matrices are column order and npy are row-order
     storage.mode(vals) <- "double"
     x <- matrix(vals, nrow = nrow(df), ncol = ncol(df), byrow = TRUE)
