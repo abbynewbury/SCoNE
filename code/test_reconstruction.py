@@ -50,8 +50,8 @@ from utilities import *
 
 
 # CODE TO RUN ALL COMPARISON METHODS (AND PARALLELIZE)
-def _call_kwargs_deploy_run(kw):
-    return deploy_run(**kw)  # expands kwargs dict
+def _call_kwargs_deploy_train_run(kw):
+    return deploy_train_run(**kw)  # expands kwargs dict
 
 def _call_kwargs_run_eval(kw):
     return run_evaluation(**kw)  # expands kwargs dict
@@ -151,7 +151,7 @@ def run_one(variable_name, variable_range, output_dir):
                                          "lambda_val":lambda_val, "rank":3}
                     cfgs_eval.append(evaluation_kwargs)
         with ProcessPoolExecutor() as pool:
-            list(pool.map(_call_kwargs_deploy_run, cfgs))
+            list(pool.map(_call_kwargs_deploy_train_run, cfgs))
         with ProcessPoolExecutor() as pool:
             results_list = list(pool.map(_call_kwargs_run_eval, cfgs_eval))
         tuning_results = pd.concat(results_list, ignore_index=True)
@@ -230,7 +230,7 @@ def run_one(variable_name, variable_range, output_dir):
                                                 "sim":sim, "init_name":init, "variable_name":variable_name, "variable":variable, 
                                                 "lambda_val":lambda_val, "rank":3})
         with ProcessPoolExecutor() as pool:
-            list(pool.map(_call_kwargs_deploy_run, cfgs))
+            list(pool.map(_call_kwargs_deploy_test_run, cfgs))
         with ProcessPoolExecutor() as pool:
             results_list = list(pool.map(_call_kwargs_run_eval, cfgs_eval))
         testing_results = pd.concat(results_list, ignore_index=True)

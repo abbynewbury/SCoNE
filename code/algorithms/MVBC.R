@@ -64,21 +64,7 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
     cl_full <- rep(0, nrow(G))  # fill with 0s by default
     cl_full[remaining] <- cl  
     W[, i] <- cl_full
-    # compute loss
-    G_plus_C_loss_i <- 0
-    for (j in seq_len(length(datasets))) {
-      # calculate sigma_i
-      zu <- result$z * result$U[,j]  
-      B <- tcrossprod(zu, result$V[[j]]) 
-      sigma <- sum(datasets[[j]] * B)/(norm(B,"F")^2)
-
-      # rank-1 reconstruction: (z ⊙ u_j) v_j^T 
-      R <- datasets[[j]] -  sigma * B
-      G_plus_C_loss_i <- G_plus_C_loss_i + norm(R,"F")^2 
-    }
-    total_loss_i <- G_plus_C_loss_i + lambda_W*l0(result$z) + lambda_H_G*l0(result$V[[1]]) + lambda_H_C*l0(result$V[[2]]) 
-    total_loss[[i]] <- total_loss_i
-    G_plus_C_loss[[i]] <- G_plus_C_loss_i
+    
     # drop individuals in cluster
     drop_mask <- cl == 1 # individuals to drop before next rank 1 run 
     if (all(drop_mask, na.rm = TRUE)) {
@@ -88,11 +74,9 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
     remaining <- remaining[!drop_mask]  
 
   }
-  # compute loss as sum over len(rank)
   factor_matrices <- list(W = W)
-  mean_weights <- colSums(W)[seq_len(length(G_plus_C_loss))]
-  loss_history <- list(G_plus_C_loss=sum(unlist(G_plus_C_loss) * mean_weights),
-                       total_loss=sum(unlist(total_loss) * mean_weights))
+  loss_history <- list(failed_converge=any(is.nan(result$U))) # use loss function just to indicate convergence
+
   output <- list(factor_matrices = factor_matrices,loss_history = loss_history)
   cat(toJSON(output, auto_unbox = TRUE))
 }
