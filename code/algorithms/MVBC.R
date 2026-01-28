@@ -21,7 +21,7 @@ read_matrix <- function(path, mode = "double") {
     x <- matrix(vals, nrow = nrow(df), ncol = ncol(df), byrow = TRUE)
 
   } else if (ext == "npy") {
-    x <- RcppCNPy::npyLoad(path, "integer")
+    x <- RcppCNPy::npyLoad(path)
   } else {
     stop("Unsupported file type: ", ext)
   }

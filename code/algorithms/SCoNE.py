@@ -236,9 +236,64 @@ def proj_nonneg(x):
 def armijo_suff_decrease_cond(f_new,f,g,x_new,x,sigma):
     return f_new - f <= sigma*np.dot(g.ravel(),(x_new-x).ravel())
 
-def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, l1=0):
+# def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, l1=0,max_ls=0):
+#     """
+#     Projected gradient descent with Armijo rule.
+
+#     f: objective function, g: gradient
+#     sigma (Armijo constant in (0,1)); rho (shrink factor in (0,1))
+#     l1: lambda for L1 soft-thresholding sparsity parameter
+#     """
+#     x = proj_nonneg(x0)
+#     n=1
+
+#     def x_and_s(step, x, g):
+#         z = x - step * g
+#         if l1 > 0:
+#             z = soft_thresh(z, step * l1)
+#         x_new = proj_nonneg(z)
+#         s = x_new - x
+#         return x_new, s
+
+#     # Armijo backtracking
+#     for it in range(max_iter):
+#         f= fun(x)
+#         g = grad(x)
+
+#         x_new, s = x_and_s(n, x, g)
+#         f_new = fun(x_new)
+
+#         if f_new - f <= sigma * np.vdot(g, s):
+#             # grow n: n <- n / rho until Armijo fails or projection makes no change
+#             while True:
+#                 n_next = n / rho
+#                 x_next, s_next = x_and_s(n_next, x, g)
+#                 if np.allclose(x_next, x_new):
+#                     break
+#                 f_next = fun(x_next)
+#                 if not (f_next - f <= sigma * np.vdot(g, s_next)):
+#                     break
+#                 n, x_new, s, f_new = n_next, x_next, s_next, f_next
+#         else:
+#             while True:
+#                 n_next= n * rho
+#                 x_next, s_next = x_and_s(n_next, x, g)
+#                 f_next = fun(x_next)
+#                 if f_next - f <= sigma * np.vdot(g, s_next):
+#                     n, x_new, s, f_new = n_next, x_next, s_next, f_next
+#                     break
+#                 n, x_new, s, f_new = n_next, x_next, s_next, f_next
+        
+#         # implement early stopping
+#         if abs(f_new - f)/max(1.0, abs(f)) < ftol:
+#             return x_new
+        
+#         x = x_new
+#     return x
+
+def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, l1=0, max_ls=10):
     """
-    Projected gradient descent with Armijo rule.
+    Projected gradient descent with Armijo rule (shrink-only).
 
     f: objective function, g: gradient
     sigma (Armijo constant in (0,1)); rho (shrink factor in (0,1))
@@ -261,28 +316,33 @@ def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, l1=
         g = grad(x)
 
         x_new, s = x_and_s(n, x, g)
+        # If projection makes no change, accept and stop
+        if np.linalg.norm(s) == 0.0:
+            return x
+        
         f_new = fun(x_new)
 
-        if f_new - f <= sigma * np.vdot(g, s):
-            # grow n: n <- n / rho until Armijo fails or projection makes no change
-            while True:
-                n_next = n / rho
-                x_next, s_next = x_and_s(n_next, x, g)
-                if np.allclose(x_next, x_new):
+        if f_new - f > sigma * np.vdot(g, s):
+            ok=False
+            n_try=n
+            # shrink
+            for _ in range(max_ls):
+                n_try *= rho # shrink cumulatively
+                x_next, s_next = x_and_s(n_try, x, g)
+                if np.linalg.norm(s_next) == 0.0:
+                    x_new, f_new = x, f
+                    n = n_try
+                    ok = True
                     break
-                f_next = fun(x_next)
-                if not (f_next - f <= sigma * np.vdot(g, s_next)):
-                    break
-                n, x_new, s, f_new = n_next, x_next, s_next, f_next
-        else:
-            while True:
-                n_next= n * rho
-                x_next, s_next = x_and_s(n_next, x, g)
+
                 f_next = fun(x_next)
                 if f_next - f <= sigma * np.vdot(g, s_next):
-                    n, x_new, s, f_new = n_next, x_next, s_next, f_next
+                    n, x_new, s, f_new = n_try, x_next, s_next, f_next
+                    ok=True
                     break
-                n, x_new, s, f_new = n_next, x_next, s_next, f_next
+            if not ok:
+                # line search failed: safest policy is no move
+                return x
         
         # implement early stopping
         if abs(f_new - f)/max(1.0, abs(f)) < ftol:
@@ -302,7 +362,7 @@ def alternating_opt(
     inner_ftol=1e-5, # options for pgd_armijo (stopping criteria for ftol)
     max_outer=200,
     min_outer=5,
-    tol=1e-6,post_hoc_rescale=False,
+    tol=1e-6,max_ls=10,post_hoc_rescale=False,
     # if test is True, W is the only factor matrix that will be optimized (for train/test split)
     test=False,
     H_G=None, H_C=None, U_G=None, U_C=None
@@ -334,7 +394,7 @@ def alternating_opt(
             l1 = 0
         else:
             raise ValueError(f"Unknown block {name}")
-        x = pgd_armijo(f, g, x0, max_iter=max_inner, rho=rho, sigma=sigma, ftol=inner_ftol, l1=l1)
+        x = pgd_armijo(f, g, x0, max_iter=max_inner, rho=rho, sigma=sigma, ftol=inner_ftol, l1=l1, max_ls=max_ls)
         return x.reshape(X.shape, order='F')
 
     N = G.shape[0] if G is not None else C.shape[0]
@@ -436,7 +496,7 @@ def alternating_opt(
 
 def SCoNE_parallel(
     G,C,Z,              # true matrices
-    rank, num_init=1, # init: number of initializations (will choose one with best loss as final result), should have this=1 when test=True
+    rank, num_init=1,n_jobs=1, # init: number of initializations (will choose one with best loss as final result), should have this=1 when test=True
     alpha=0,lambda_H_G=0, lambda_H_C=0, lambda_Gloss=1,                  # regularization parameters
     G_loss_type='kl_div', C_loss_type='kl_div', # in 'kl_div',  'fro' or None (None indicates not fitting to data, i.e. if G_loss_type=None & C_loss_type='fro then C only optimization)
     max_inner=50, # options for pgd_armijo
@@ -445,12 +505,12 @@ def SCoNE_parallel(
     inner_ftol=1e-5, # options for pgd_armijo (stopping criteria for ftol)
     max_outer=200,
     min_outer=5,
-    tol=1e-6,post_hoc_rescale=False,
+    tol=1e-6,max_ls=10,post_hoc_rescale=False,
     # if test is True, W is the only factor matrix that will be optimized (for train/test split)
     test=False,
     H_G=None, H_C=None, U_G=None, U_C=None):
 
-    results = Parallel(n_jobs=-1, prefer="processes")(
+    results = Parallel(n_jobs=n_jobs, prefer="processes")(
         delayed(alternating_opt)(
         **{"G":G,"C":C,"Z":Z,              # true matrices
         "rank":rank, # init: number of initializations (will choose one with best loss as final result), should have this=1 when test=True
@@ -462,7 +522,7 @@ def SCoNE_parallel(
         "inner_ftol":inner_ftol, # options for pgd_armijo (stopping criteria for ftol)
         "max_outer":max_outer,
         "min_outer":min_outer,
-        "tol":tol,"post_hoc_rescale":post_hoc_rescale,
+        "tol":tol,"max_ls":max_ls, "post_hoc_rescale":post_hoc_rescale,
         "test":test,
         "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C}) for run in range(num_init))
     

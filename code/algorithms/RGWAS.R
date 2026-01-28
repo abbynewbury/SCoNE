@@ -27,7 +27,7 @@ read_matrix <- function(path, mode = "double") {
     x <- matrix(vals, nrow = nrow(df), ncol = ncol(df), byrow = TRUE)
 
   } else if (ext == "npy") {
-    x <- RcppCNPy::npyLoad(path, "integer")
+    x <- RcppCNPy::npyLoad(path)
   } else {
     stop("Unsupported file type: ", ext)
   }
@@ -41,7 +41,6 @@ C <- read_matrix(C_path)
 
 # read in Z
 Z <- read_matrix(Z_path)
-Z <- Z[,-ncol(Z)] # last column of Z is perfectly multicollinear with rest
 
 covars <- cbind(1,G,Z)
 C_binary <- (C != 0) + 0L

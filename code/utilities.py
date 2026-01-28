@@ -10,7 +10,7 @@ import pickle
 import algorithms.SCoNE as SCoNE
 import algorithms.MVBCWrapper as MVBCWrapper
 import algorithms.RGWASWrapper as RGWASWrapper
-
+import time
 
 # Algorithm comparison functions
 def profile_function(func, *args, mem_target='function', **kwargs):
@@ -141,3 +141,15 @@ def deploy_test_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambd
         json.dump(loss_function, f)
     with open(f"{out_path}_factor_matrices.pkl", "wb") as f:
         pickle.dump(factor_matrices, f)
+
+def _call_kwargs_deploy_train_run(kw):
+    start = time.perf_counter()
+    deploy_train_run(**kw)  
+    # record run name and lambda option
+    return f'{kw["run_name"]}_{kw["reg_params"]["lambda_H_G"]}', time.perf_counter() - start
+
+def _call_kwargs_deploy_test_run(kw):
+    start = time.perf_counter()
+    deploy_test_run(**kw)  
+    # record run name and lambda option
+    return f'{kw["run_name"]}_{kw["reg_params"]["lambda_H_G"]}', time.perf_counter() - start
