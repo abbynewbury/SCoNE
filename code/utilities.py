@@ -48,14 +48,18 @@ def deploy_train_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lamb
         if run_name=='HNMF(res)':
             C = C - Z @ np.linalg.lstsq(Z, C,rcond=None)[0]
             G = G - Z @ np.linalg.lstsq(Z, G,rcond=None)[0]
-        print('done residualizing',flush=True)
+        
         # set G and C loss types
         if 'G-' in run_name: 
             G_loss_type,C_loss_type=('kl_div',None)
             C=None
+            if 'NMF' in run_name:
+                Z=None
         elif 'C-' in run_name: 
             G_loss_type,C_loss_type=(None,'kl_div')
             G=None
+            if 'NMF' in run_name:
+                Z=None
         elif run_name=='SCoNE(Fro)': G_loss_type,C_loss_type=('fro','fro')
         elif run_name=='HNMF':
             G_loss_type,C_loss_type=('kl_div','kl_div')
@@ -66,12 +70,12 @@ def deploy_train_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lamb
         else: G_loss_type,C_loss_type=('kl_div','kl_div')
 
 
-
+        
         algorithm_func_kwargs={"G":G, "C":C, "Z":Z,"rank":rank, "num_init":num_init, 
                         "alpha":reg_params['alpha'], "lambda_H_G":reg_params['lambda_H_G'], "lambda_H_C":reg_params['lambda_H_C'],"lambda_Gloss":lambda_Gloss,
-                        "max_inner":50, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4,
+                        "max_inner":20, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4, "max_ls":20,
                         "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
-                        "max_outer":500, "min_outer":5, "tol":1e-6,"post_hoc_rescale":False}
+                        "max_outer":300, "min_outer":5, "tol":1e-3,"post_hoc_rescale":False}
         factor_matrices, loss_function = SCoNE.SCoNE_parallel(**algorithm_func_kwargs)
 
     elif run_name == 'MVBC':
@@ -89,7 +93,7 @@ def deploy_train_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lamb
         json.dump(loss_function, f)
     with open(f"{out_path}_factor_matrices.pkl", "wb") as f:
         pickle.dump(factor_matrices, f)
-
+        
 
 def deploy_test_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambda_Gloss=None,
                     H_G=None,H_C=None,U_G=None,U_C=None,rank=3,num_init=1):
@@ -106,11 +110,15 @@ def deploy_test_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambd
         C=None
         H_C=None
         U_C=None
+        if 'NMF' in run_name:
+            Z=None
     elif 'C-' in run_name: 
         G_loss_type,C_loss_type=(None,'kl_div')
         G=None
         H_G=None
         U_G=None
+        if 'NMF' in run_name:
+            Z=None
     elif run_name=='SCoNE(Fro)': G_loss_type,C_loss_type=('fro','fro')
     elif run_name=='HNMF':
         G_loss_type,C_loss_type=('kl_div','kl_div')
@@ -127,9 +135,9 @@ def deploy_test_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambd
 
     algorithm_func_kwargs={"G":G, "C":C, "Z":Z,"rank":rank, "num_init":num_init, 
                     "alpha":reg_params['alpha'], "lambda_H_G":reg_params['lambda_H_G'], "lambda_H_C":reg_params['lambda_H_C'],"lambda_Gloss":lambda_Gloss,
-                    "max_inner":50, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4,
+                    "max_inner":20, "rho":0.5, "sigma":1e-4, "inner_ftol":1e-4, "max_ls":15,
                     "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
-                    "max_outer":500, "min_outer":5, "tol":1e-6,"post_hoc_rescale":False,"test":True,
+                    "max_outer":300, "min_outer":5, "tol":1e-3,"post_hoc_rescale":False,"test":True,
                     "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C
                     }
     factor_matrices, loss_function = SCoNE.SCoNE_parallel(**algorithm_func_kwargs)
@@ -143,13 +151,15 @@ def deploy_test_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambd
         pickle.dump(factor_matrices, f)
 
 def _call_kwargs_deploy_train_run(kw):
+    kw = dict(kw)
+    job_id = kw.pop("job_id")
     start = time.perf_counter()
     deploy_train_run(**kw)  
-    # record run name and lambda option
-    return f'{kw["run_name"]}_{kw["reg_params"]["lambda_H_G"]}', time.perf_counter() - start
+    return job_id, time.perf_counter() - start
 
 def _call_kwargs_deploy_test_run(kw):
+    kw = dict(kw)
+    job_id = kw.pop("job_id")
     start = time.perf_counter()
     deploy_test_run(**kw)  
-    # record run name and lambda option
-    return f'{kw["run_name"]}_{kw["reg_params"]["lambda_H_G"]}', time.perf_counter() - start
+    return job_id, time.perf_counter() - start
