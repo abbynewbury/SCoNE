@@ -285,7 +285,7 @@ def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, l1=
                     break
                 n = n_next
             else:
-                n=1 # reset, no acceptable step foudn within max_ls
+                n=1 # reset, no acceptable step found within max_ls
                 break
         
         # implement early stopping
@@ -295,67 +295,6 @@ def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, l1=
         x = x_new
     return x
 
-# # faster version:
-# def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, l1=0, max_ls=10):
-#     """
-#     Projected gradient descent with Armijo rule (shrink-only).
-
-#     f: objective function, g: gradient
-#     sigma (Armijo constant in (0,1)); rho (shrink factor in (0,1))
-#     l1: lambda for L1 soft-thresholding sparsity parameter
-#     """
-#     x = proj_nonneg(x0)
-#     g_norm = np.linalg.norm(grad(x)) / np.sqrt(x.size)
-#     n= 0.1 / max(g_norm, 1.0) # larger gradients --> smaller initial step
-
-#     def x_and_s(step, x, g):
-#         z = x - step * g
-#         if l1 > 0:
-#             z = soft_thresh(z, step * l1)
-#         x_new = proj_nonneg(z)
-#         s = x_new - x
-#         return x_new, s
-
-#     # Armijo backtracking
-#     for it in range(max_iter):
-#         f= fun(x)
-#         g = grad(x)
-
-#         x_new, s = x_and_s(n, x, g)
-#         # If projection makes no change, accept and stop
-#         if np.linalg.norm(s) == 0.0:
-#             return x
-        
-#         f_new = fun(x_new)
-
-#         if f_new - f > sigma * np.vdot(g, s):
-#             ok=False
-#             n_try=n
-#             # shrink
-#             for _ in range(max_ls):
-#                 n_try *= rho # shrink cumulatively
-#                 x_next, s_next = x_and_s(n_try, x, g)
-#                 if np.linalg.norm(s_next) == 0.0:
-#                     x_new, f_new = x, f
-#                     n = n_try
-#                     ok = True
-#                     break
-
-#                 f_next = fun(x_next)
-#                 if f_next - f <= sigma * np.vdot(g, s_next):
-#                     n, x_new, s, f_new = n_try, x_next, s_next, f_next
-#                     ok=True
-#                     break
-#             if not ok:
-#                 # line search failed: safest policy is no move
-#                 return x
-        
-#         # implement early stopping
-#         if abs(f_new - f)/max(1.0, abs(f)) < ftol:
-#             return x_new
-        
-#         x = x_new
-#     return x
 
 def alternating_opt(
     G,C,Z,              # true matrices
