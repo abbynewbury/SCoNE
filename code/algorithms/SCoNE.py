@@ -243,6 +243,7 @@ def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, l1=
     f: objective function, g: gradient
     sigma (Armijo constant in (0,1)); rho (shrink factor in (0,1))
     l1: lambda for L1 soft-thresholding sparsity parameter
+    max_ls: how much willing to increase/decrease step size by (rho^max_ls)
     """
     x = proj_nonneg(x0)
     n=1
@@ -266,7 +267,7 @@ def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, l1=
         if f_new - f <= sigma * np.vdot(g, s):
             # grow n: n <- n / rho until Armijo fails or projection makes no change
             for _ in range(max_ls):
-                n_next = n / rho
+                n_next = min(n / rho, 1e6) # cap growth
                 x_next, s_next = x_and_s(n_next, x, g)
                 if np.allclose(x_next, x_new):
                     break
@@ -282,7 +283,10 @@ def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, l1=
                 if f_next - f <= sigma * np.vdot(g, s_next):
                     n, x_new, s, f_new = n_next, x_next, s_next, f_next
                     break
-                n, x_new, s, f_new = n_next, x_next, s_next, f_next
+                n = n_next
+            else:
+                n=1 # reset, no acceptable step foudn within max_ls
+                break
         
         # implement early stopping
         if abs(f_new - f)/max(1.0, abs(f)) < ftol:
