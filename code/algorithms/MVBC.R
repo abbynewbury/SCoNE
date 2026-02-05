@@ -49,11 +49,6 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
   remaining <- seq_len(nrow(G)) # indices of individuals still under consideration
   W <- matrix(0, nrow = dim(G)[1], ncol = rank)
   for (i in seq_len(rank)){
-    if(i==rank || length(remaining)<=5){ # in this case next rank gets all remaining individuals
-        cl_full <- rep(0, nrow(G)) 
-        cl_full[remaining] <- 1
-        W[, i] <- cl_full
-        break}
     G_i <- G[remaining, , drop = FALSE]
     C_i <- C[remaining, , drop = FALSE]
 
