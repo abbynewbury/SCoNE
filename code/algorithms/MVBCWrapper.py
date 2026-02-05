@@ -19,6 +19,6 @@ def MVBCWrapper(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, r_path):
     json_str = r_output[r_output.index("{"):]
     parsed = json.loads(json_str)
     factor_matrices = {k: np.array(v) for k,v in parsed["factor_matrices"].items()}
-    loss_history = {k: [v] for k, v in parsed["loss_history"].items()} 
+    loss_history = None
 
     return factor_matrices, loss_history

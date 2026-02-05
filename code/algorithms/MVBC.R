@@ -75,7 +75,7 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
 
   }
   factor_matrices <- list(W = W)
-  loss_history <- 0 # just a placeholder
+  loss_history <- list(0) # just a placeholder
 
   output <- list(factor_matrices = factor_matrices,loss_history = loss_history)
   cat(toJSON(output, auto_unbox = TRUE))
