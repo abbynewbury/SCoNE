@@ -39,14 +39,15 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
   # --- Read G ---
   G <- read_matrix(G_path)
 
-  # --- Read C (.npy) ---
+  # --- Read C ---
   C <- read_matrix(C_path)
+
+  stopifnot(!any(is.nan(G)))
+  stopifnot(!any(is.nan(C)))
 
   # --- Run MVBC ---
   remaining <- seq_len(nrow(G)) # indices of individuals still under consideration
   W <- matrix(0, nrow = dim(G)[1], ncol = rank)
-  total_loss <- list()
-  G_plus_C_loss <- list()
   for (i in seq_len(rank)){
     if(i==rank || length(remaining)<=5){ # in this case next rank gets all remaining individuals
         cl_full <- rep(0, nrow(G)) 
@@ -55,8 +56,7 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
         break}
     G_i <- G[remaining, , drop = FALSE]
     C_i <- C[remaining, , drop = FALSE]
-    stopifnot(!any(is.nan(G)))
-    stopifnot(!any(is.nan(C)))
+
     datasets <- list(G_i, C_i)
     result <- mvsvdl1(datasets, lvs, lz)
     # store W
@@ -75,7 +75,7 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
 
   }
   factor_matrices <- list(W = W)
-  loss_history <- list(failed_converge=any(is.nan(result$U))) # use loss function just to indicate convergence
+  loss_history <- 0 # just a placeholder
 
   output <- list(factor_matrices = factor_matrices,loss_history = loss_history)
   cat(toJSON(output, auto_unbox = TRUE))

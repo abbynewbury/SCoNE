@@ -46,8 +46,8 @@ def deploy_train_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lamb
         if 'SCoNE' not in run_name:
             reg_params = {'alpha':0,'lambda_H_G':0, 'lambda_H_C':0}
         if run_name=='HNMF(res)':
-            C = C - Z @ np.linalg.lstsq(Z, C,rcond=None)[0]
-            G = G - Z @ np.linalg.lstsq(Z, G,rcond=None)[0]
+            C = np.maximum(C - Z @ np.linalg.lstsq(Z, C,rcond=None)[0],0)
+            G = np.maximum(G - Z @ np.linalg.lstsq(Z, G,rcond=None)[0],0)
         
         # set G and C loss types
         if 'G-' in run_name: 
@@ -73,9 +73,9 @@ def deploy_train_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lamb
         
         algorithm_func_kwargs={"G":G, "C":C, "Z":Z,"rank":rank, "num_init":num_init, 
                         "alpha":reg_params['alpha'], "lambda_H_G":reg_params['lambda_H_G'], "lambda_H_C":reg_params['lambda_H_C'],"lambda_Gloss":lambda_Gloss,
-                        "max_inner":20, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4, "max_ls":20,
+                        "max_inner":20, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4,"max_ls":50,
                         "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
-                        "max_outer":300, "min_outer":5, "tol":1e-3,"post_hoc_rescale":False}
+                        "max_outer":300, "min_outer":10, "tol":1e-4,"post_hoc_rescale":False}
         factor_matrices, loss_function = SCoNE.SCoNE_parallel(**algorithm_func_kwargs)
 
     elif run_name == 'MVBC':
@@ -101,8 +101,8 @@ def deploy_test_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambd
     if 'SCoNE' not in run_name:
         reg_params = {'alpha':0,'lambda_H_G':0, 'lambda_H_C':0}
     if run_name=='HNMF(res)':
-        C = C - Z @ np.linalg.lstsq(Z, C,rcond=None)[0]
-        G = G - Z @ np.linalg.lstsq(Z, G,rcond=None)[0]
+        C = np.maximum(C - Z @ np.linalg.lstsq(Z, C,rcond=None)[0],0)
+        G = np.maximum(G - Z @ np.linalg.lstsq(Z, G,rcond=None)[0],0)
         
     # set G and C loss types and test params
     if 'G-' in run_name: 
@@ -135,9 +135,9 @@ def deploy_test_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambd
 
     algorithm_func_kwargs={"G":G, "C":C, "Z":Z,"rank":rank, "num_init":num_init, 
                     "alpha":reg_params['alpha'], "lambda_H_G":reg_params['lambda_H_G'], "lambda_H_C":reg_params['lambda_H_C'],"lambda_Gloss":lambda_Gloss,
-                    "max_inner":20, "rho":0.5, "sigma":1e-4, "inner_ftol":1e-4, "max_ls":15,
+                    "max_inner":20, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4,"max_ls":50,
                     "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
-                    "max_outer":300, "min_outer":5, "tol":1e-3,"post_hoc_rescale":False,"test":True,
+                    "max_outer":300, "min_outer":10, "tol":1e-4,"post_hoc_rescale":False,"test":True,
                     "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C
                     }
     factor_matrices, loss_function = SCoNE.SCoNE_parallel(**algorithm_func_kwargs)
