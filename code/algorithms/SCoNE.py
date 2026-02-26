@@ -2,7 +2,7 @@ import numpy as np
 from collections import defaultdict
 from scipy.special import xlogy
 from joblib import Parallel, delayed
-
+from algorithms._initialize_nmf import _initialize_nmf
 
 def compute_loss(X,X_hat,loss_type):
     if loss_type == 'kl_div':
@@ -301,6 +301,7 @@ def alternating_opt(
     rank,
     alpha=0,lambda_H_G=0, lambda_H_C=0, lambda_Gloss=1,                  # regularization parameters
     G_loss_type='kl_div', C_loss_type='kl_div', # in 'kl_div',  'fro' or None (None indicates not fitting to data, i.e. if G_loss_type=None & C_loss_type='fro then C only optimization)
+    init='random', # using sklearn _initialize_nmf  {'random', 'nndsvd', 'nndsvda', 'nndsvdar'}
     max_inner=50, # options for pgd_armijo
     rho=0.1, # options for pgd_armijo (n shrink factor)
     sigma=1e-4, # options for pgd_armijo (Armijo constant)
@@ -345,12 +346,14 @@ def alternating_opt(
     N = G.shape[0] if G is not None else C.shape[0]
 
     # initialize factor matrices
-    W = np.random.uniform(low=0.1,high=1,size=(N, rank))
-    col_norms = np.linalg.norm(W, axis=0)  # shape (rank,), as suggeted by Kim and Park 2007
-    W = W / col_norms
-    if not test:
+    if test:
+        W = np.random.uniform(low=0.1,high=1,size=(N, rank))
+    else:
+        W_init = []
         if G is not None:
-            H_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], rank))
+            W_G, H_G = _initialize_nmf(G, n_components=rank, init=init)
+            H_G = H_G.T
+            W_init.append(W_G)
             if Z is not None:
                 U_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], Z.shape[1]))
             else: U_G = None
@@ -358,13 +361,17 @@ def alternating_opt(
             H_G = None
             U_G = None
         if C is not None:
-            H_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], rank)) 
+            W_C, H_C = _initialize_nmf(C, n_components=rank, init=init)
+            H_C = H_C.T
+            W_init.append(W_C)
             if Z is not None:
                 U_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], Z.shape[1]))
             else: U_C = None
         else:
             H_C = None
             U_C = None
+        W = np.mean(W_init, axis=0)
+
 
     # initial objective
     loss_dict = defaultdict(list)
@@ -441,7 +448,7 @@ def alternating_opt(
 
 def SCoNE_parallel(
     G,C,Z,              # true matrices
-    rank, num_init=1,n_jobs=1, # init: number of initializations (will choose one with best loss as final result), should have this=1 when test=True
+    rank, init='random',num_init=1,n_jobs=1, # init: number of initializations (will choose one with best loss as final result), should have this=1 when test=True
     alpha=0,lambda_H_G=0, lambda_H_C=0, lambda_Gloss=1,                  # regularization parameters
     G_loss_type='kl_div', C_loss_type='kl_div', # in 'kl_div',  'fro' or None (None indicates not fitting to data, i.e. if G_loss_type=None & C_loss_type='fro then C only optimization)
     max_inner=50, # options for pgd_armijo
@@ -456,7 +463,7 @@ def SCoNE_parallel(
     H_G=None, H_C=None, U_G=None, U_C=None):
 
     kwargs = {"G":G,"C":C,"Z":Z,              # true matrices
-            "rank":rank, # init: number of initializations (will choose one with best loss as final result), should have this=1 when test=True
+            "rank":rank, "init":init,
             "alpha":alpha,"lambda_H_G":lambda_H_G, "lambda_H_C":lambda_H_C, "lambda_Gloss":lambda_Gloss,                  # regularization parameters
             "G_loss_type":G_loss_type, "C_loss_type":C_loss_type, # in 'kl_div',  'fro' or None (None indicates not fitting to data, i.e. if G_loss_type=None & C_loss_type='fro then C only optimization)
             "max_inner":max_inner, # options for pgd_armijo
