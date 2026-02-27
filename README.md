@@ -29,14 +29,14 @@ matrices = simulate_views(n=100, num_genes=10, M_C=10, M_Z=5, rank=3, seed=0)
 All methods will return two dictionaries: one containing learned factor matrices and the other containing recorded loss.
 
 ### SCoNE
-All methods that use the python file SCoNE for their implementation take matrices as input in numpy form. We provide the function with required parameters G, C and Z, as well as the rank of the decomposition. Other optional parameters we include are regularization parameters alpha, lambda_H_G, and lambda_H_C. We leave num_init=1, which represents the number of random initializations to run. We set lambda_Gloss=1 indicating that the views have equal relative weight. We set the loss for G and C decomposition to both be KL-divergence. There are additional parameters such as tolerance and min/max iterations but we leave them as default. Refer to SCoNE.py for more information on these.
+All methods that use the python file SCoNE for their implementation take matrices as input in numpy form. We provide the function with required parameters G, C and Z, as well as the rank of the decomposition. Other optional parameters we include are regularization parameters alpha, lambda_H_G, and lambda_H_C. We set num_init=10, which represents the number of initializations to run. Initializations can be random (init='random'), or variations of NNSVD ('nndsvd', 'nndsvda', 'nndsvdar'). We set lambda_Gloss=1 indicating that the views have equal relative weight. We set the loss for G and C decomposition to both be KL-divergence. There are additional parameters such as tolerance and min/max iterations but we leave them as default. Refer to SCoNE.py for more information on these.
 
 ```python
 from algorithms.SCoNE import SCoNE_parallel
 factor_matrices, loss_function = SCoNE_parallel(
     matrices['G'],matrices['C'],matrices['Z'], rank=3,
-    alpha=max(matrices['G'].max(),matrices['C'].max())**2,lambda_H_G=0.1, lambda_H_C=0.1, lambda_Gloss=1, num_init=1,        # regularization parameters
-    G_loss_type='kl_div', C_loss_type='kl_div', # in 'kl_div',  'fro' or None
+    alpha=max(matrices['G'].max(),matrices['C'].max())**2,lambda_H_G=1e-4, lambda_H_C=1e-4, lambda_Gloss=1,   # regularization parameters
+    num_init=10,init='nndsvda',G_loss_type='kl_div', C_loss_type='kl_div', # in 'kl_div',  'fro' or None
 )
 ```
 
@@ -46,8 +46,8 @@ SCoNE (Fro) represents SCoNE performed assuming a Frobenius loss instead of KL d
 ```python
 factor_matrices, loss_function = SCoNE_parallel(
     matrices['G'],matrices['C'],matrices['Z'], rank=3,
-    alpha=max(matrices['G'].max(),matrices['C'].max())**2,lambda_H_G=0.1, lambda_H_C=0.1, lambda_Gloss=1,         # regularization parameters
-    G_loss_type='fro', C_loss_type='fro', # in 'kl_div',  'fro' or None
+    alpha=max(matrices['G'].max(),matrices['C'].max())**2,lambda_H_G=1e-4, lambda_H_C=1e-4, lambda_Gloss=1,         # regularization parameters
+    num_init=10,init='nndsvda',G_loss_type='fro', C_loss_type='fro', # in 'kl_div',  'fro' or None
 )
 ```
 
@@ -58,7 +58,7 @@ CoNE represents SCoNE with no regularization, so we set alpha, lambda_H_G and la
 factor_matrices, loss_function = SCoNE_parallel(
     matrices['G'],matrices['C'],matrices['Z'], rank=3,
     alpha=0,lambda_H_G=0, lambda_H_C=0, lambda_Gloss=1,         # regularization parameters
-    G_loss_type='kl_div', C_loss_type='kl_div', # in 'kl_div',  'fro' or None
+    num_init=10,init='nndsvda',G_loss_type='kl_div', C_loss_type='kl_div', # in 'kl_div',  'fro' or None
 )
 ```
 
@@ -69,19 +69,21 @@ HNMF represents SCoNE with no regularization and no removal of unwanted variatio
 factor_matrices, loss_function = SCoNE_parallel(
     matrices['G'],matrices['C'],None, rank=3,
     alpha=0,lambda_H_G=0, lambda_H_C=0, lambda_Gloss=1,         # regularization parameters
-    G_loss_type='kl_div', C_loss_type='kl_div', # in 'kl_div',  'fro' or None
+    num_init=10,init='nndsvda',G_loss_type='kl_div', C_loss_type='kl_div', # in 'kl_div',  'fro' or None
 )
 ```
 ### HNMF (res)
 HNMF (res) simply represents running HNMF on matrices C and G after residualizing out Z. We set the loss for both to be Frobenius loss since after residualization the data no longer represents counts. The code can look something like this:
 ```python
-C_resid = matrices['C'] - matrices['Z'] @ np.linalg.lstsq(matrices['Z'], matrices['C'],rcond=None)[0]
-G_resid = matrices['G'] - matrices['Z'] @ np.linalg.lstsq(matrices['Z'], matrices['G'],rcond=None)[0]
+from algorithms.SCoNE import proj_nonneg
+
+C_resid = proj_nonneg(matrices['C'] - matrices['Z'] @ np.linalg.lstsq(matrices['Z'], matrices['C'],rcond=None)[0])
+G_resid = proj_nonneg(matrices['G'] - matrices['Z'] @ np.linalg.lstsq(matrices['Z'], matrices['G'],rcond=None)[0])
 
 factor_matrices, loss_function = SCoNE_parallel(
     G_resid,C_resid,None, rank=3,
     alpha=0,lambda_H_G=0, lambda_H_C=0, lambda_Gloss=1,         # regularization parameters
-    G_loss_type='fro', C_loss_type='fro', # in 'kl_div',  'fro' or None
+    num_init=10,init='nndsvda',G_loss_type='fro', C_loss_type='fro', # in 'kl_div',  'fro' or None
 )
 ```
 
@@ -90,7 +92,7 @@ C-CoNE performs a covariate-aware decomposition of the C matrix only. To remove 
 ```python
 factor_matrices, loss_function = SCoNE_parallel(
     None,matrices['C'],matrices['Z'], rank=3,
-    G_loss_type=None, C_loss_type='kl_div', # in 'kl_div',  'fro' or None
+    num_init=10,init='nndsvda',G_loss_type=None, C_loss_type='kl_div', # in 'kl_div',  'fro' or None
 )
 ```
 
@@ -99,7 +101,7 @@ G-CoNE performs a covariate-aware decomposition of the G matrix only. To remove 
 ```python
 factor_matrices, loss_function = SCoNE_parallel(
     matrices['G'],None,matrices['Z'], rank=3,
-    G_loss_type='kl_div', C_loss_type=None, # in 'kl_div',  'fro' or None
+    num_init=10,init='nndsvda',G_loss_type='kl_div', C_loss_type=None, # in 'kl_div',  'fro' or None
 )
 ```
 
@@ -108,7 +110,7 @@ C-NMF performs NMF on the C matrix. To remove consideration of G and Z, we set G
 ```python
 factor_matrices, loss_function = SCoNE_parallel(
     None,matrices['C'],None, rank=3,
-    G_loss_type=None, C_loss_type='kl_div', # in 'kl_div',  'fro' or None
+    num_init=10,init='nndsvda',G_loss_type=None, C_loss_type='kl_div', # in 'kl_div',  'fro' or None
 )
 ```
 
@@ -117,7 +119,7 @@ G-NMF performs NMF on the G matrix. To remove consideration of C and Z, we set C
 ```python
 factor_matrices, loss_function = SCoNE_parallel(
     matrices['G'],None,None, rank=3,
-    G_loss_type='kl_div', C_loss_type=None, # in 'kl_div',  'fro' or None
+    num_init=10,init='nndsvda',G_loss_type='kl_div', C_loss_type=None, # in 'kl_div',  'fro' or None
 )
 ```
 
@@ -158,3 +160,6 @@ The python file 'code/test_reconstruction.py' contains code used to simulate dat
 
 ## Algorithm evaluation 
 Utilities for algorithm evaluation on simulated data are stored in the evaluation folder, most importantly under the reconstruction_evaluation.py file.
+
+## Other notes
+The SCoNE_parallel() function has n_jobs=1 as default, meaning the initializations run sequentially rather than in parallel. This is often preferable for large problems because it allows NumPy’s internal multithreading to fully utilize available CPU cores for each run. For smaller problems, increasing n_jobs can improve performance by running multiple initializations in parallel.

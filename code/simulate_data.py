@@ -46,6 +46,7 @@ def simulate_views(n=2500, num_genes=100, M_C=100, M_Z=5, rank=3, seed=0, ZU_wei
     # generate 5 superpopulations
     superpops = rng.permutation(n) % M_Z   
     Z = (superpops[:, None] == np.arange(M_Z)).astype(int) 
+    assert all(Z.sum(axis=1) == 1) # all samples in exactly one group
 
     #2. impose sparsity (P(W_ij=0)=sparsity)
     mask = np.random.rand(*(M_C,rank)) > sparsity
@@ -56,7 +57,7 @@ def simulate_views(n=2500, num_genes=100, M_C=100, M_Z=5, rank=3, seed=0, ZU_wei
 
     avg_corr = np.mean([np.corrcoef(W_C[:,k], W_G[:,k])[0,1]
                     for k in range(W_C.shape[1])])
-
+    assert np.abs(avg_corr - rho) < 0.1
     
     # Means
     M_c = W_C@H_C.T + (ZU_weight)*Z@U_C.T + (noise)*proj_nonneg(rng.normal(size=(n, M_C)))

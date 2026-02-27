@@ -308,7 +308,7 @@ def alternating_opt(
     inner_ftol=1e-5, # options for pgd_armijo (stopping criteria for ftol)
     max_outer=200,
     min_outer=5,
-    tol=1e-6,max_ls=10,post_hoc_rescale=False,
+    tol=1e-6,max_ls=50,post_hoc_rescale=False,
     # if test is True, W is the only factor matrix that will be optimized (for train/test split)
     test=False,
     H_G=None, H_C=None, U_G=None, U_C=None
@@ -355,7 +355,7 @@ def alternating_opt(
             H_G = H_G.T
             W_init.append(W_G)
             if Z is not None:
-                U_G = np.random.uniform(low=0.1,high=1,size=(G.shape[1], Z.shape[1]))
+                U_G = H_G.mean()*np.random.uniform(low=0.1,high=1,size=(G.shape[1], Z.shape[1])) # scaled to match H
             else: U_G = None
         else:
             H_G = None
@@ -365,7 +365,7 @@ def alternating_opt(
             H_C = H_C.T
             W_init.append(W_C)
             if Z is not None:
-                U_C = np.random.uniform(low=0.1,high=1,size=(C.shape[1], Z.shape[1]))
+                U_C = H_C.mean()*np.random.uniform(low=0.1,high=1,size=(C.shape[1], Z.shape[1]))
             else: U_C = None
         else:
             H_C = None
@@ -457,7 +457,7 @@ def SCoNE_parallel(
     inner_ftol=1e-5, # options for pgd_armijo (stopping criteria for ftol)
     max_outer=200,
     min_outer=5,
-    tol=1e-6,max_ls=10,post_hoc_rescale=False,
+    tol=1e-6,max_ls=50,post_hoc_rescale=False,
     # if test is True, W is the only factor matrix that will be optimized (for train/test split)
     test=False,
     H_G=None, H_C=None, U_G=None, U_C=None):

@@ -41,7 +41,7 @@ def profile_function(func, *args, mem_target='function', **kwargs):
 
 
 def deploy_train_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambda_Gloss=None,
-                    G_path='',C_path='',Z_path='',r_path='',rank=3,num_init=1):
+                    G_path='',C_path='',Z_path='',r_path='',rank=3, num_init=1, n_jobs=1):
 
     if run_name in ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','HNMF(res)','CoNE','SCoNE','SCoNE(Fro)']:
         if 'SCoNE' not in run_name:
@@ -72,7 +72,7 @@ def deploy_train_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lamb
 
 
         
-        algorithm_func_kwargs={"G":G, "C":C, "Z":Z,"rank":rank, "num_init":num_init, "init":"nndsvda",
+        algorithm_func_kwargs={"G":G, "C":C, "Z":Z,"rank":rank, "num_init":num_init, "init":"nndsvda", "n_jobs":n_jobs,
                         "alpha":reg_params['alpha'], "lambda_H_G":reg_params['lambda_H_G'], "lambda_H_C":reg_params['lambda_H_C'],"lambda_Gloss":lambda_Gloss,
                         "max_inner":20, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4,"max_ls":50,
                         "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
@@ -97,7 +97,7 @@ def deploy_train_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lamb
 
 
 def deploy_test_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambda_Gloss=None,
-                    H_G=None,H_C=None,U_G=None,U_C=None,rank=3,num_init=1,C_train=None,G_train=None,Z_train=None):
+                    H_G=None,H_C=None,U_G=None,U_C=None,rank=3,num_init=1,n_jobs=1,C_train=None,G_train=None,Z_train=None):
 
     if 'SCoNE' not in run_name:
         reg_params = {'alpha':0,'lambda_H_G':0, 'lambda_H_C':0}
@@ -134,7 +134,7 @@ def deploy_test_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambd
     else: G_loss_type,C_loss_type=('kl_div','kl_div')
 
 
-    algorithm_func_kwargs={"G":G, "C":C, "Z":Z,"rank":rank, "num_init":num_init, "init":"random",
+    algorithm_func_kwargs={"G":G, "C":C, "Z":Z,"rank":rank, "num_init":num_init, "init":"nndsvda", "n_jobs":n_jobs,
                     "alpha":reg_params['alpha'], "lambda_H_G":reg_params['lambda_H_G'], "lambda_H_C":reg_params['lambda_H_C'],"lambda_Gloss":lambda_Gloss,
                     "max_inner":20, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4,"max_ls":50,
                     "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
