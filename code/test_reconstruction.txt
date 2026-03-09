@@ -1,1 +1,0 @@
-slurmstepd: error: *** JOB 13975308 ON ne1dc6-001 CANCELLED AT 2026-02-27T17:00:36 ***

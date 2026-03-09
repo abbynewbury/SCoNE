@@ -24,6 +24,8 @@ We will illustrate the implementation of each of these algorithms using simulate
 import numpy as np
 from simulate_data import simulate_views
 matrices = simulate_views(n=100, num_genes=10, M_C=10, M_Z=5, rank=3, seed=0)
+# drop multicollinear column of Z and add intercept to Z
+matrices['Z'] = np.c_[np.ones(matrices['Z'][:,1:].shape[0]), matrices['Z'][:,1:]]
 ```
 
 All methods will return two dictionaries: one containing learned factor matrices and the other containing recorded loss.

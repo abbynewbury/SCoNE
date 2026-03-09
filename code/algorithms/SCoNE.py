@@ -2,6 +2,8 @@ import numpy as np
 from collections import defaultdict
 from scipy.special import xlogy
 from joblib import Parallel, delayed
+import json
+import pickle
 from algorithms._initialize_nmf import _initialize_nmf
 
 def compute_loss(X,X_hat,loss_type):
@@ -460,7 +462,9 @@ def SCoNE_parallel(
     tol=1e-6,max_ls=50,post_hoc_rescale=False,
     # if test is True, W is the only factor matrix that will be optimized (for train/test split)
     test=False,
-    H_G=None, H_C=None, U_G=None, U_C=None):
+    H_G=None, H_C=None, U_G=None, U_C=None, 
+    write_all_init=False, write_all_init_path='' # write all init out
+    ):
 
     kwargs = {"G":G,"C":C,"Z":Z,              # true matrices
             "rank":rank, "init":init,
@@ -480,6 +484,11 @@ def SCoNE_parallel(
         results = []
         for run in range(num_init):
             result = alternating_opt(**kwargs)
+            if write_all_init:
+                with open(f"{write_all_init_path}_{run}_loss_function.json", "w") as f: 
+                    json.dump(result[1], f)
+                with open(f"{write_all_init_path}_{run}_factor_matrices.pkl", "wb") as f:
+                    pickle.dump(result[0], f)
             results.append(result)
     else:
         results = Parallel(n_jobs=n_jobs, prefer="processes")(

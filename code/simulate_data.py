@@ -18,7 +18,7 @@ def make_correlated_matrices(m, r, rho, seed=1):
         assert np.allclose(W1, W2)
     return W1, W2
 
-def simulate_views(n=2500, num_genes=100, M_C=100, M_Z=5, rank=3, seed=0, ZU_weight=1, noise=0, sparsity=0, rho=1):
+def simulate_views(n=2500, num_genes=100, M_C=100, M_Z=3, rank=3, seed=0, ZU_weight=1, noise=0, sparsity=0, rho=1, Z_noise=0):
     """
     G:  n x num_genes  (Poisson with rate WH_g.T + ZU_g.T)
     C:  n x M_C  (Poisson with rate WH_c.T + ZU_c.T)
@@ -43,10 +43,16 @@ def simulate_views(n=2500, num_genes=100, M_C=100, M_Z=5, rank=3, seed=0, ZU_wei
     U_C = proj_nonneg(rng.normal(size=(M_C, M_Z)))
     U_G =  proj_nonneg(rng.normal(size=(num_genes, M_Z)))
 
-    # generate 5 superpopulations
+    # generate M_Z superpopulations
     superpops = rng.permutation(n) % M_Z   
-    Z = (superpops[:, None] == np.arange(M_Z)).astype(int) 
-    assert all(Z.sum(axis=1) == 1) # all samples in exactly one group
+    true_Z = (superpops[:, None] == np.arange(M_Z)).astype(int) 
+    # add noise to individuals of one superpopulation (Z is not a perfect approximation)
+    Z_noise = Z_noise * np.random.rand(*true_Z.shape)
+    Z = true_Z.astype(float).copy() # approximation
+    k = 0 # perturb the first column
+    Z[:, k] += Z_noise[:, k] * np.random.rand(true_Z.shape[0])
+    Z /= Z.sum(axis=1, keepdims=True)
+    assert np.allclose(Z.sum(axis=1), 1, atol=1e-8) # all samples in exactly one group
 
     #2. impose sparsity (P(W_ij=0)=sparsity)
     mask = np.random.rand(*(M_C,rank)) > sparsity
@@ -60,12 +66,12 @@ def simulate_views(n=2500, num_genes=100, M_C=100, M_Z=5, rank=3, seed=0, ZU_wei
     assert np.abs(avg_corr - rho) < 0.1
     
     # Means
-    M_c = W_C@H_C.T + (ZU_weight)*Z@U_C.T + (noise)*proj_nonneg(rng.normal(size=(n, M_C)))
-    M_g = W_G@H_G.T + (ZU_weight)*Z@U_G.T + (noise)*proj_nonneg(rng.normal(size=(n, num_genes)))
+    M_c = W_C@H_C.T + (ZU_weight)*true_Z@U_C.T + (noise)*proj_nonneg(rng.normal(size=(n, M_C)))
+    M_g = W_G@H_G.T + (ZU_weight)*true_Z@U_G.T + (noise)*proj_nonneg(rng.normal(size=(n, num_genes)))
 
     # Generate the two observed matrices
     G = rng.poisson(M_g)  
     C = rng.poisson(M_c)                  
 
-    return {"G": G, "C": C, "Z":Z, "W_C": W_C, "W_G":W_G, "H_G": H_G, "H_C": H_C, "U_G": U_G, "U_C": U_C}
+    return {"G": G, "C": C, "Z":Z, "W_C": W_C, "W_G":W_G, "H_G": H_G, "H_C": H_C, "U_G": U_G, "U_C": U_C, "true_Z":true_Z}
 
