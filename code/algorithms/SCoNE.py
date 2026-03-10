@@ -5,6 +5,7 @@ from joblib import Parallel, delayed
 import json
 import pickle
 from algorithms._initialize_nmf import _initialize_nmf
+from evaluation.reconstruction_evaluation import calculate_ccc
 
 def compute_loss(X,X_hat,loss_type):
     if loss_type == 'kl_div':
@@ -357,7 +358,7 @@ def alternating_opt(
             H_G = H_G.T
             W_init.append(W_G)
             if Z is not None:
-                U_G = H_G.mean()*np.random.uniform(low=0.1,high=1,size=(G.shape[1], Z.shape[1])) # scaled to match H
+                _, U_G = _initialize_nmf(Z, n_components=G.shape[1], init='random') # always a random init, Z just sets shape
             else: U_G = None
         else:
             H_G = None
@@ -367,7 +368,7 @@ def alternating_opt(
             H_C = H_C.T
             W_init.append(W_C)
             if Z is not None:
-                U_C = H_C.mean()*np.random.uniform(low=0.1,high=1,size=(C.shape[1], Z.shape[1]))
+                _, U_C = _initialize_nmf(Z, n_components=C.shape[1], init='random') # always a random init  
             else: U_C = None
         else:
             H_C = None
@@ -484,19 +485,30 @@ def SCoNE_parallel(
         results = []
         for run in range(num_init):
             result = alternating_opt(**kwargs)
-            if write_all_init:
-                with open(f"{write_all_init_path}_{run}_loss_function.json", "w") as f: 
-                    json.dump(result[1], f)
-                with open(f"{write_all_init_path}_{run}_factor_matrices.pkl", "wb") as f:
-                    pickle.dump(result[0], f)
+
             results.append(result)
     else:
         results = Parallel(n_jobs=n_jobs, prefer="processes")(
             delayed(alternating_opt)(
             **kwargs) for run in range(num_init))
     
+    # FOR: writing and calculating cophenetic correlation coefficient
+    W_list = []
+    for run, result in enumerate(results):
+        if write_all_init:
+            with open(f"{write_all_init_path}_{run}_loss_function.json", "w") as f: 
+                json.dump(result[1], f)
+            with open(f"{write_all_init_path}_{run}_factor_matrices.pkl", "wb") as f:
+                pickle.dump(result[0], f)
+                # Assign each sample to its strongest component
+        W_list.append(result[0]['W'])
+    coph_corr = calculate_ccc(W_list)
+    # FOR: writing and calculating cophenetic correlation coefficient
+    
     final_factor_matrices, final_loss_dict = min(
         results,
         key=lambda x: x[1]["total_loss"][-1]
     )
+    final_loss_dict['coph_corr'] = coph_corr
+    
     return final_factor_matrices, final_loss_dict

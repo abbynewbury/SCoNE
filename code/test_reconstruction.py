@@ -54,54 +54,70 @@ def _call_kwargs_run_eval(kw):
     return run_evaluation(**kw)  # expands kwargs dict
 
 def run_evaluation(run_name,file_path,sim, num_init, variable_name, variable, lambda_val, rank, split):
-
-    for run in range(num_init):
-        with open(f'{file_path}_{run}_factor_matrices.pkl', "rb") as f:
+    results = []
+    results_columns = ['run_name','factor_matrix','init','sim','rel_error_G','rel_error_C']
+    if run_name == 'MVBC':
+        with open(f'{file_path}_factor_matrices.pkl', "rb") as f:
             factor_matrices = pickle.load(f)
 
         try:
-            with open(f'{file_path}_{run}_loss_function.json', "r") as f:
+            with open(f'{file_path}_loss_function.json', "r") as f:
                 loss_function = json.load(f)
         except json.JSONDecodeError as e:
             raise RuntimeError(
                 f"JSON decode failed for: {file_path}_loss_function.json\n"
             ) from e
 
-
-        results = []
-        results_columns = ['run_name','factor_matrix','init','sim']
-
-        if run_name in ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)']:
-            G_loss = loss_function['G_loss'][-1]
-            C_loss = loss_function['C_loss'][-1]
-            if not 'C-' in run_name:
-                rel_error_G = G_loss/reconstruction_evaluation.kl_rel_error_denom(sim["G"])
-            else: rel_error_G = None
-            if not 'G-' in run_name:
-                rel_error_C = C_loss/reconstruction_evaluation.kl_rel_error_denom(sim["C"])
-            else: rel_error_C = None
-
-        elif run_name == 'MVBC':
-            if factor_matrices is False: # run failed for reasons specified in MVBCWrapper
-                return pd.DataFrame() 
-            rel_error_G = None
-            rel_error_C = None
-        elif run_name == 'RGWAS':
-            if factor_matrices is False: # run failed for reasons specified in RGWASWrapper
-                return pd.DataFrame() 
-            rel_error_G = None
-            rel_error_C = None
-        else: assert True == False, f"invalid run name {run_name}"
+        if factor_matrices is False: # run failed for reasons specified in MVBCWrapper
+            return pd.DataFrame() 
+        rel_error_G = None
+        rel_error_C = None
         for k,v in factor_matrices.items():
             if k=="W":
-                results.append([run_name,"W_C",run,reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v)])
-                results.append([run_name,"W_G",run,reconstruction_evaluation.best_permutation_similarity(sim["W_G"],v)])
+                results.append([run_name,"W_C",0,reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v,),rel_error_G,rel_error_C])
+                results.append([run_name,"W_G",0,reconstruction_evaluation.best_permutation_similarity(sim["W_G"],v),rel_error_G,rel_error_C])
             else:
-                results.append([run_name,k,run,reconstruction_evaluation.best_permutation_similarity(sim[k],v)])
+                results.append([run_name,k,0,reconstruction_evaluation.best_permutation_similarity(sim[k],v),rel_error_G,rel_error_C])
+    else:
+        for run in range(num_init):
+            with open(f'{file_path}_{run}_factor_matrices.pkl', "rb") as f:
+                factor_matrices = pickle.load(f)
+
+            try:
+                with open(f'{file_path}_{run}_loss_function.json', "r") as f:
+                    loss_function = json.load(f)
+            except json.JSONDecodeError as e:
+                raise RuntimeError(
+                    f"JSON decode failed for: {file_path}_loss_function.json\n"
+                ) from e
+
+
+            if run_name in ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','CoNE','SCoNE','SCoNE(Fro)']:
+                G_loss = loss_function['G_loss'][-1]
+                C_loss = loss_function['C_loss'][-1]
+                if not 'C-' in run_name:
+                    rel_error_G = G_loss/reconstruction_evaluation.kl_rel_error_denom(sim["G"])
+                else: rel_error_G = None
+                if not 'G-' in run_name:
+                    rel_error_C = C_loss/reconstruction_evaluation.kl_rel_error_denom(sim["C"])
+                else: rel_error_C = None
+
+            elif run_name == 'RGWAS':
+                if factor_matrices is False: # run failed for reasons specified in RGWASWrapper
+                    return pd.DataFrame() 
+                rel_error_G = None
+                rel_error_C = None
+            else: assert True == False, f"invalid run name {run_name}"
+            for k,v in factor_matrices.items():
+                if k=="W":
+                    results.append([run_name,"W_C",run,reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v),rel_error_G,rel_error_C])
+                    results.append([run_name,"W_G",run,reconstruction_evaluation.best_permutation_similarity(sim["W_G"],v),rel_error_G,rel_error_C])
+                else:
+                    results.append([run_name,k,run,reconstruction_evaluation.best_permutation_similarity(sim[k],v),rel_error_G,rel_error_C])
+    # calculate CCC
+    
     results = pd.DataFrame(results,columns=results_columns)
     results[variable_name] = variable
-    results['rel_error_G'] = rel_error_G
-    results['rel_error_C'] = rel_error_C
     results['lambda_val'] = lambda_val
     results['split'] = split
     results['rank'] = rank
@@ -138,6 +154,7 @@ def _one_run(tune_arg: dict, tmp_folder: str, variable_name: str, split):
         ta["run_name"],
         ta["out_path"],
         sim,
+        ta["num_init"],
         variable_name,
         variable_val,
         ta["reg_params"]["lambda_H_G"],

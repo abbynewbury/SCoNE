@@ -46,11 +46,10 @@ def simulate_views(n=2500, num_genes=100, M_C=100, M_Z=3, rank=3, seed=0, ZU_wei
     # generate M_Z superpopulations
     superpops = rng.permutation(n) % M_Z   
     true_Z = (superpops[:, None] == np.arange(M_Z)).astype(int) 
-    # add noise to individuals of one superpopulation (Z is not a perfect approximation)
+    # add noise to individuals ALL superpopulations - TODO: check (Z is not a perfect approximation)
     Z_noise = Z_noise * np.random.rand(*true_Z.shape)
-    Z = true_Z.astype(float).copy() # approximation
-    k = 0 # perturb the first column
-    Z[:, k] += Z_noise[:, k] * np.random.rand(true_Z.shape[0])
+    Z = true_Z.astype(float).copy()
+    Z += Z_noise * np.random.rand(*true_Z.shape)
     Z /= Z.sum(axis=1, keepdims=True)
     assert np.allclose(Z.sum(axis=1), 1, atol=1e-8) # all samples in exactly one group
 
