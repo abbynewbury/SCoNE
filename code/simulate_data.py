@@ -69,8 +69,8 @@ def simulate_views(n=2500, num_genes=100, M_C=100, M_Z=3, rank=3, seed=0, ZU_wei
     M_g = W_G@H_G.T + (ZU_weight)*true_Z@U_G.T + (noise)*proj_nonneg(rng.normal(size=(n, num_genes)))
 
     # Generate the two observed matrices
-    G = rng.poisson(M_g)  
-    C = rng.poisson(M_c)                  
+    G = rng.poisson(M_g).astype(float)  
+    C = rng.poisson(M_c).astype(float)     
 
     return {"G": G, "C": C, "Z":Z, "W_C": W_C, "W_G":W_G, "H_G": H_G, "H_C": H_C, "U_G": U_G, "U_C": U_C, "true_Z":true_Z}
 

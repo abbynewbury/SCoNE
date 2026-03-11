@@ -77,7 +77,7 @@ def run_evaluation(run_name,file_path,sim, num_init, variable_name, variable, la
                 results.append([run_name,"W_C",0,reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v,),rel_error_G,rel_error_C])
                 results.append([run_name,"W_G",0,reconstruction_evaluation.best_permutation_similarity(sim["W_G"],v),rel_error_G,rel_error_C])
             else:
-                results.append([run_name,k,0,reconstruction_evaluation.best_permutation_similarity(sim[k],v),rel_error_G,rel_error_C])
+                assert True==False, "MVBC returning something other than W"
     else:
         for run in range(num_init):
             with open(f'{file_path}_{run}_factor_matrices.pkl', "rb") as f:
@@ -112,6 +112,13 @@ def run_evaluation(run_name,file_path,sim, num_init, variable_name, variable, la
                 if k=="W":
                     results.append([run_name,"W_C",run,reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v),rel_error_G,rel_error_C])
                     results.append([run_name,"W_G",run,reconstruction_evaluation.best_permutation_similarity(sim["W_G"],v),rel_error_G,rel_error_C])
+                elif k in ['U_G','U_C']:
+                    U1 = sim[k][:,0]
+                    U2 = sim[k][:,1]
+                    U3 = sim[k][:,2]
+                    Z_input = np.c_[np.ones(sim['Z'][:,1:].shape[0]), sim['Z'][:,1:]] # get Z how it was input
+                    U_input = np.column_stack((U1, U2-U1, U3-U1)) # true U based on Z input
+                    results.append([run_name,k,run,reconstruction_evaluation.frobenius_cosine_similarity(U_input,v),rel_error_G,rel_error_C])
                 else:
                     results.append([run_name,k,run,reconstruction_evaluation.best_permutation_similarity(sim[k],v),rel_error_G,rel_error_C])
     # calculate CCC
@@ -181,7 +188,7 @@ def run_one(variable_name, variable_range, output_dir):
         np.save(f'{tmp_folder}/Z_{variable_name}_{variable}',sim['Z'][:,1:].astype(np.float64))
 
     # ---- config -----
-    lambda_options = [0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1, 10, 100]
+    lambda_options = [0, 1e-4, 1e-3, 1e-2, 1e-1, 1, 10]
     tuning_run_names = ['SCoNE' ,'SCoNE(Fro)','MVBC']
     training_run_names = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','SCoNE','SCoNE(Fro)','RGWAS','MVBC']
 
@@ -312,7 +319,7 @@ if __name__ == "__main__":
     run_one("rho",  [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0], output_dir=f'{root_dir}/output')
 
     # ASSESS RUNS OVER WEIGHT OF COVARIATE SIGNAL
-    # run_one("ZU_weight",  [0.25,0.5,0.75,1.0,1.5,2.0], output_dir=f'{root_dir}/output')
+    run_one("ZU_weight",  [0.25,0.5,0.75,1.0,1.5,2.0], output_dir=f'{root_dir}/output')
 
     # ASSESS RUNS OVER NOISE
     run_one("noise",  [0.0,0.5,1.0], output_dir=f'{root_dir}/output')
