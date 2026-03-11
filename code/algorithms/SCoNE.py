@@ -355,6 +355,8 @@ def alternating_opt(
         W_init = []
         if G is not None:
             W_G, H_G = _initialize_nmf(G, n_components=rank, init=init)
+            if np.mean(W_G == 0)>0 or np.mean(H_G == 0)>0:
+                assert True==False, f"getting sparse factor matrix inits W_G:{np.mean(W_G == 0)}, H_G: {np.mean(H_G == 0)}. make sure C and G have type float"
             H_G = H_G.T
             W_init.append(W_G)
             if Z is not None:
@@ -365,6 +367,8 @@ def alternating_opt(
             U_G = None
         if C is not None:
             W_C, H_C = _initialize_nmf(C, n_components=rank, init=init)
+            if np.mean(W_C == 0)>0 or np.mean(H_C == 0)>0:
+                assert True==False, f"getting sparse factor matrix inits W_C:{np.mean(W_C == 0)}, H_C: {np.mean(H_C == 0)}. make sure C and G have type float"
             H_C = H_C.T
             W_init.append(W_C)
             if Z is not None:
