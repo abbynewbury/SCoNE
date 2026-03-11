@@ -141,7 +141,7 @@ def deploy_test_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambd
                     "alpha":reg_params['alpha'], "lambda_H_G":reg_params['lambda_H_G'], "lambda_H_C":reg_params['lambda_H_C'],"lambda_Gloss":lambda_Gloss,
                     "max_inner":20, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4,"max_ls":50,
                     "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
-                    "max_outer":300, "min_outer":10, "tol":1e-4,"post_hoc_rescale":True,"test":True,
+                    "max_outer":300, "min_outer":10, "tol":1e-4,"post_hoc_rescale":False,"test":True,
                     "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C, "write_all_init":write_all_init, "write_all_init_path":write_all_init_path
                     }
     factor_matrices, loss_function = SCoNE.SCoNE_parallel(**algorithm_func_kwargs)

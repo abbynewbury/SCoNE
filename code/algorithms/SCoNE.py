@@ -358,7 +358,7 @@ def alternating_opt(
             H_G = H_G.T
             W_init.append(W_G)
             if Z is not None:
-                _, U_G = _initialize_nmf(Z, n_components=G.shape[1], init='random') # always a random init, Z just sets shape
+                U_G = H_G.mean()*np.abs(np.random.standard_normal(size=(G.shape[1], Z.shape[1])))
             else: U_G = None
         else:
             H_G = None
@@ -368,7 +368,7 @@ def alternating_opt(
             H_C = H_C.T
             W_init.append(W_C)
             if Z is not None:
-                _, U_C = _initialize_nmf(Z, n_components=C.shape[1], init='random') # always a random init  
+                U_C = H_C.mean()*np.abs(np.random.standard_normal(size=(C.shape[1], Z.shape[1])))
             else: U_C = None
         else:
             H_C = None

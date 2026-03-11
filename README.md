@@ -165,3 +165,9 @@ Utilities for algorithm evaluation on simulated data are stored in the evaluatio
 
 ## Other notes
 The SCoNE_parallel() function has n_jobs=1 as default, meaning the initializations run sequentially rather than in parallel. This is often preferable for large problems because it allows NumPy’s internal multithreading to fully utilize available CPU cores for each run. For smaller problems, increasing n_jobs can improve performance by running multiple initializations in parallel.
+
+## Common pitfalls
+Here are a few additional setup instructions to keep in mind:
+1. Make sure that the features of Z are generally on the same scale. For example, if Z consists of admixture fractions, sex at birth (binary), and year of birth, make sure to min-max normalize year of birth so it sits on the same 0-1 scale as other variables.
+2. If population structure features are admixture fractions, drop one to avoid perfect multicollienarity of features. However, when one is dropped, you then need to ensure that Z contains an intercept term (this restores the ability of the model to represent the dropped component).
+3. For initialization, we use sklearns initialize_nmf. If the input matrices C and G are not represented as floats before input and instead are integers, sklearn random initialization will cause extreme sparsity in the initial factor matrices, which will cause poor decomposition results. 
