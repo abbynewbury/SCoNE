@@ -183,14 +183,14 @@ def run_one(variable_name, variable_range, output_dir):
         with open(f'{tmp_folder}/sim_{variable_name}_{variable}.pkl','wb') as f:
             pickle.dump(sim,f)
         # write G,C,Z to paths
-        np.save(f'{tmp_folder}/G_{variable_name}_{variable}',sim["G"].astype(np.float64))
-        np.save(f'{tmp_folder}/C_{variable_name}_{variable}',sim["C"].astype(np.float64))
-        np.save(f'{tmp_folder}/Z_{variable_name}_{variable}',sim['Z'][:,1:].astype(np.float64))
+        pd.DataFrame(sim["G"]).to_csv(f'{tmp_folder}/G_{variable_name}_{variable}.csv')
+        pd.DataFrame(sim["C"]).to_csv(f'{tmp_folder}/C_{variable_name}_{variable}.csv')
+        pd.DataFrame(sim["Z"]).to_csv(f'{tmp_folder}/Z_{variable_name}_{variable}.csv')
 
     # ---- config -----
     lambda_options = [0, 1e-4, 1e-3, 1e-2, 1e-1, 1, 10]
-    tuning_run_names = ['SCoNE' ,'SCoNE(Fro)','MVBC']
-    training_run_names = ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','SCoNE','SCoNE(Fro)','RGWAS','MVBC']
+    tuning_run_names = ['SCoNE'] #['SCoNE' ,'SCoNE(Fro)','MVBC']
+    training_run_names = ['SCoNE'] # ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','SCoNE','SCoNE(Fro)','RGWAS','MVBC']
 
     # ---- make compact DF ----
     plan = pd.DataFrame(
@@ -225,12 +225,12 @@ def run_one(variable_name, variable_range, output_dir):
     # deploy tuning runs
     tuning_args, tuning_rows = [], []
     for idx, row in plan[plan['split']=='tuning'].iterrows():
-        G_path = f'{tmp_folder}/G_{variable_name}_{row.variable}.npy'
-        C_path = f'{tmp_folder}/C_{variable_name}_{row.variable}.npy'
-        Z_path = f'{tmp_folder}/Z_{variable_name}_{row.variable}.npy'
-        G = np.load(G_path)
-        C = np.load(C_path)
-        Z = np.load(Z_path)
+        G_path = f'{tmp_folder}/G_{variable_name}_{row.variable}.csv'
+        C_path = f'{tmp_folder}/C_{variable_name}_{row.variable}.csv'
+        Z_path = f'{tmp_folder}/Z_{variable_name}_{row.variable}.csv'
+        G = pd.read_csv(G_path, index_col=0).to_numpy(dtype=np.float64)
+        C = pd.read_csv(C_path, index_col=0).to_numpy(dtype=np.float64)
+        Z = pd.read_csv(Z_path, index_col=0).to_numpy(dtype=np.float64)
         # add intercept for NMF runs
         Z = np.c_[np.ones(Z.shape[0]), Z] 
         if row.lambda_option != 0: alpha = max(G.max(), C.max())**2
@@ -260,6 +260,7 @@ def run_one(variable_name, variable_range, output_dir):
         for fut in as_completed(futures):
             job_id, computation_time, results = fut.result()
             computation_times_tune[job_id] = computation_time
+            results['job_id'] = job_id
             all_results.append(results)
 
     tune_record["computation_time"] = tune_record["job_id"].map(computation_times_tune)
@@ -303,6 +304,7 @@ def run_one(variable_name, variable_range, output_dir):
         for fut in as_completed(futures):
             job_id, computation_time, results = fut.result()
             computation_times_train[job_id] = computation_time
+            results['job_id'] = job_id
             all_results.append(results)
     
     train_record["computation_time"] = train_record["job_id"].map(computation_times_train)

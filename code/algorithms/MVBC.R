@@ -1,32 +1,16 @@
 library(mvcluster)
-library(RcppCNPy)
 library(jsonlite)
 library(data.table)
 
 l0 <- function(x) sum(abs(x) > 0)
 
-read_matrix <- function(path, mode = "double") {
+read_matrix <- function(path) {
   # if csv/tsv: assumes that the first column is index names
   ext <- tools::file_ext(path)
-
-  if (ext %in% c("csv", "tsv")) {
-    df <- if (ext == "csv") {
-      read.csv(path, row.names = 1)
-    } else {
-      read.delim(path, row.names = 1)
-    }
-
-    vals <- as.vector(as.matrix(df)) # store as vector first since R matrices are column order and npy are row-order
-    storage.mode(vals) <- "double"
-    x <- matrix(vals, nrow = nrow(df), ncol = ncol(df), byrow = TRUE)
-
-  } else if (ext == "npy") {
-    x <- RcppCNPy::npyLoad(path)
-  } else {
-    stop("Unsupported file type: ", ext)
-  }
-
-  storage.mode(x) <- mode
+  if (ext == "csv") { x <- as.matrix(read.csv(path, row.names = 1, check.names = FALSE)) }
+  else if (ext == "tsv") { x <- as.matrix(read.delim(path, row.names = 1, check.names = FALSE)) }
+  else { stop("Unsupported file type: ", ext) }
+  storage.mode(x) <- "double"
   x
 }
 
