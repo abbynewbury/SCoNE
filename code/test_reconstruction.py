@@ -193,7 +193,7 @@ def run_one(variable_name, variable_range, output_dir):
             lambda_option=(lam if is_sparse(rn) else 0))
         for variable in variable_range
         for rn in tuning_run_names
-        for split in ['tuning']
+        for split in ['tune']
         for lam in (lambda_options if is_sparse(rn) else [0])]
     )
     new_rows = pd.DataFrame(
@@ -203,7 +203,7 @@ def run_one(variable_name, variable_range, output_dir):
             lambda_option=(lam if is_sparse(rn) else 0))
         for variable in variable_range
         for rn in training_run_names
-        for split in ['training']
+        for split in ['train']
         for lam in (lambda_options if is_sparse(rn) else [0])]
     )
     plan = pd.concat([plan, new_rows], ignore_index=True)
@@ -217,28 +217,27 @@ def run_one(variable_name, variable_range, output_dir):
 
     # deploy tuning runs
     tuning_args, tuning_rows = [], []
-    for idx, row in plan[plan['split']=='tuning'].iterrows():
+    for idx, row in plan[plan['split']=='tune'].iterrows():
         G_path = f'{tmp_folder}/G_{variable_name}_{row.variable}.csv'
         C_path = f'{tmp_folder}/C_{variable_name}_{row.variable}.csv'
         Z_path = f'{tmp_folder}/Z_{variable_name}_{row.variable}.csv'
         G = pd.read_csv(G_path, index_col=0).to_numpy(dtype=np.float64)
         C = pd.read_csv(C_path, index_col=0).to_numpy(dtype=np.float64)
         Z = pd.read_csv(Z_path, index_col=0).to_numpy(dtype=np.float64)
-        # add intercept for NMF runs
-        Z = np.c_[np.ones(Z.shape[0]), Z] 
+
         if row.lambda_option != 0: alpha = max(G.max(), C.max())**2
         else: alpha=0
         reg = {'lambda_W':row.lambda_option,'alpha':alpha,'lambda_H_G':row.lambda_option,'lambda_H_C':row.lambda_option}
         
         a = dict(job_id=row.job_id,run_name=row.run_name, out_path=row.out_path, G=G, C=C, Z=Z, reg_params=reg,variable=row.variable,
             lambda_Gloss=1, 
-            G_path=G_path, C_path=C_path, Z_path=Z_path, r_path='/gpfs/commons/home/anewbury/miniconda/bin/Rscript', rank=3, num_init=10,
+            G_path=G_path, C_path=C_path, Z_path=Z_path, r_path='/gpfs/commons/home/anewbury/miniconda/bin/Rscript', rank=3, num_init=50,
             write_all_init=True, write_all_init_path=row.out_path) 
         tuning_args.append(a)
         tuning_rows.append(dict(out_path=row.out_path,variable=row.variable,
                                 run_name=row.run_name,job_id=row.job_id,
                                 lambda_option=row.lambda_option, alpha=reg['alpha'], lambda_W=reg['lambda_W'],
-                                lambda_H_G=reg['lambda_H_G'],lambda_H_C=reg['lambda_H_C'], rank=3, num_init=1, 
+                                lambda_H_G=reg['lambda_H_G'],lambda_H_C=reg['lambda_H_C'], rank=3, num_init=50, 
                                     lambda_Gloss=1))
     tune_record = pd.DataFrame(tuning_rows)
     # ---- run TUNE ----
@@ -262,28 +261,27 @@ def run_one(variable_name, variable_range, output_dir):
 
     # deploy training runs
     training_args, training_rows = [], []
-    for idx, row in plan[plan['split']=='training'].iterrows():
+    for idx, row in plan[plan['split']=='train'].iterrows():
         G_path = f'{tmp_folder}/G_{variable_name}_{row.variable}.csv'
         C_path = f'{tmp_folder}/C_{variable_name}_{row.variable}.csv'
         Z_path = f'{tmp_folder}/Z_{variable_name}_{row.variable}.csv'
         G = pd.read_csv(G_path, index_col=0).to_numpy(dtype=np.float64)
         C = pd.read_csv(C_path, index_col=0).to_numpy(dtype=np.float64)
         Z = pd.read_csv(Z_path, index_col=0).to_numpy(dtype=np.float64)
-        # add intercept for NMF runs
-        Z = np.c_[np.ones(Z.shape[0]), Z]
+
         if row.lambda_option != 0: alpha = max(G.max(), C.max())**2
         else: alpha=0
         reg = {'lambda_W':row.lambda_option,'alpha':alpha,'lambda_H_G':row.lambda_option,'lambda_H_C':row.lambda_option}
         
         a = dict(job_id=row.job_id,run_name=row.run_name, out_path=row.out_path, G=G, C=C, Z=Z, reg_params=reg,variable=row.variable,
             lambda_Gloss=1,
-            G_path=G_path, C_path=C_path, Z_path=Z_path, r_path='/gpfs/commons/home/anewbury/miniconda/bin/Rscript', rank=3, num_init=10,
+            G_path=G_path, C_path=C_path, Z_path=Z_path, r_path='/gpfs/commons/home/anewbury/miniconda/bin/Rscript', rank=3, num_init=50,
             write_all_init=True, write_all_init_path=row.out_path) 
         training_args.append(a)
         training_rows.append(dict(out_path=row.out_path,variable=row.variable,
                                 run_name=row.run_name,job_id=row.job_id,
                                 lambda_option=row.lambda_option, alpha=reg['alpha'], lambda_W=reg['lambda_W'],
-                                lambda_H_G=reg['lambda_H_G'],lambda_H_C=reg['lambda_H_C'], rank=3, num_init=1, 
+                                lambda_H_G=reg['lambda_H_G'],lambda_H_C=reg['lambda_H_C'], rank=3, num_init=50, 
                                     lambda_Gloss=1))
     train_record = pd.DataFrame(training_rows)
     # ---- run TRAIN ----
@@ -301,7 +299,7 @@ def run_one(variable_name, variable_range, output_dir):
             all_results.append(results)
     
     train_record["computation_time"] = train_record["job_id"].map(computation_times_train)
-    train_record.to_csv(f"{output_dir}/models/{variable_name}_run_record_tune.csv", index=False)
+    train_record.to_csv(f"{output_dir}/models/{variable_name}_run_record_train.csv", index=False)
     print("done with training", flush=True)
 
     all_results = pd.concat(all_results)
