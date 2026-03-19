@@ -112,13 +112,6 @@ def run_evaluation(run_name,file_path,sim, num_init, variable_name, variable, la
                 if k=="W":
                     results.append([run_name,"W_C",run,reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v),rel_error_G,rel_error_C])
                     results.append([run_name,"W_G",run,reconstruction_evaluation.best_permutation_similarity(sim["W_G"],v),rel_error_G,rel_error_C])
-                elif k in ['U_G','U_C']:
-                    U1 = sim[k][:,0]
-                    U2 = sim[k][:,1]
-                    U3 = sim[k][:,2]
-                    Z_input = np.c_[np.ones(sim['Z'][:,1:].shape[0]), sim['Z'][:,1:]] # get Z how it was input
-                    U_input = np.column_stack((U1, U2-U1, U3-U1)) # true U based on Z input
-                    results.append([run_name,k,run,reconstruction_evaluation.frobenius_cosine_similarity(U_input,v),rel_error_G,rel_error_C])
                 else:
                     results.append([run_name,k,run,reconstruction_evaluation.best_permutation_similarity(sim[k],v),rel_error_G,rel_error_C])
     # calculate CCC
@@ -270,12 +263,12 @@ def run_one(variable_name, variable_range, output_dir):
     # deploy training runs
     training_args, training_rows = [], []
     for idx, row in plan[plan['split']=='training'].iterrows():
-        G_path = f'{tmp_folder}/G_{variable_name}_{row.variable}.npy'
-        C_path = f'{tmp_folder}/C_{variable_name}_{row.variable}.npy'
-        Z_path = f'{tmp_folder}/Z_{variable_name}_{row.variable}.npy'
-        G = np.load(G_path)
-        C = np.load(C_path)
-        Z = np.load(Z_path)
+        G_path = f'{tmp_folder}/G_{variable_name}_{row.variable}.csv'
+        C_path = f'{tmp_folder}/C_{variable_name}_{row.variable}.csv'
+        Z_path = f'{tmp_folder}/Z_{variable_name}_{row.variable}.csv'
+        G = pd.read_csv(G_path, index_col=0).to_numpy(dtype=np.float64)
+        C = pd.read_csv(C_path, index_col=0).to_numpy(dtype=np.float64)
+        Z = pd.read_csv(Z_path, index_col=0).to_numpy(dtype=np.float64)
         # add intercept for NMF runs
         Z = np.c_[np.ones(Z.shape[0]), Z]
         if row.lambda_option != 0: alpha = max(G.max(), C.max())**2
@@ -327,4 +320,4 @@ if __name__ == "__main__":
     run_one("noise",  [0.0,0.5,1.0], output_dir=f'{root_dir}/output')
 
     # ASSESS RUNS OVER SPARSITY
-    run_one("sparsity",  [0.0,0.5,0.9], output_dir=f'{root_dir}/output')
+    run_one("sparsity",  [0.0,0.25,0.5,0.75,0.9], output_dir=f'{root_dir}/output')

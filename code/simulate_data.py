@@ -40,18 +40,13 @@ def simulate_views(n=2500, num_genes=100, M_C=100, M_Z=3, rank=3, seed=0, ZU_wei
     # generate linked markers
     H_G = proj_nonneg(rng.normal(size=(num_genes, rank)))
     # generate superpop shift for each feature
-    U_C = proj_nonneg(rng.normal(size=(M_C, M_Z)))
-    U_G =  proj_nonneg(rng.normal(size=(num_genes, M_Z)))
+    U_C = proj_nonneg(rng.normal(size=(M_C, M_Z+1)))
+    U_G =  proj_nonneg(rng.normal(size=(num_genes, M_Z+1)))
 
-    # generate M_Z superpopulations
-    superpops = rng.permutation(n) % M_Z   
-    true_Z = (superpops[:, None] == np.arange(M_Z)).astype(int) 
-    # add noise to individuals ALL superpopulations - TODO: check (Z is not a perfect approximation)
-    Z_noise = Z_noise * np.random.rand(*true_Z.shape)
-    Z = true_Z.astype(float).copy()
-    Z += Z_noise * np.random.rand(*true_Z.shape)
-    Z /= Z.sum(axis=1, keepdims=True)
-    assert np.allclose(Z.sum(axis=1), 1, atol=1e-8) # all samples in exactly one group
+    # generate M_Z Z columns
+    Z = proj_nonneg(rng.normal(size=(n, M_Z)))
+    # add an intercept
+    Z = np.column_stack([np.ones(Z.shape[0]), Z])
 
     #2. impose sparsity (P(W_ij=0)=sparsity)
     mask = np.random.rand(*(M_C,rank)) > sparsity
@@ -65,12 +60,12 @@ def simulate_views(n=2500, num_genes=100, M_C=100, M_Z=3, rank=3, seed=0, ZU_wei
     assert np.abs(avg_corr - rho) < 0.1
     
     # Means
-    M_c = W_C@H_C.T + (ZU_weight)*true_Z@U_C.T + (noise)*proj_nonneg(rng.normal(size=(n, M_C)))
-    M_g = W_G@H_G.T + (ZU_weight)*true_Z@U_G.T + (noise)*proj_nonneg(rng.normal(size=(n, num_genes)))
+    M_c = W_C@H_C.T + (ZU_weight)*Z@U_C.T + (noise)*proj_nonneg(rng.normal(size=(n, M_C)))
+    M_g = W_G@H_G.T + (ZU_weight)*Z@U_G.T + (noise)*proj_nonneg(rng.normal(size=(n, num_genes)))
 
     # Generate the two observed matrices
     G = rng.poisson(M_g).astype(float)  
     C = rng.poisson(M_c).astype(float)     
 
-    return {"G": G, "C": C, "Z":Z, "W_C": W_C, "W_G":W_G, "H_G": H_G, "H_C": H_C, "U_G": U_G, "U_C": U_C, "true_Z":true_Z}
+    return {"G": G, "C": C, "Z":Z, "W_C": W_C, "W_G":W_G, "H_G": H_G, "H_C": H_C, "U_G": U_G, "U_C": U_C}
 

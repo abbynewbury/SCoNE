@@ -25,8 +25,9 @@ C <- read_matrix(C_path)
 
 # read in Z
 Z <- read_matrix(Z_path)
-
-covars <- cbind(1,G,Z)
+# check that Z has intercept column
+stopifnot(any(apply(Z, 2, function(col) all(col == 1))))
+covars <- cbind(G,Z)
 C_binary <- (C != 0) + 0L
 result <- mfmr(Yb=C_binary,  Yq=NULL, G=covars, K=rank, nrun=num_init)
 cat(toJSON(result, auto_unbox = TRUE))
