@@ -26,7 +26,7 @@ def best_permutation_similarity(W_true, W_hat):
     M = W_true.T @ W_hat 
     row_ind, col_ind = linear_sum_assignment(-M) # maximize numerator
     W_hat_perm = W_hat[:, col_ind] # optimal permutation
-    return frobenius_cosine_similarity(W_true, W_hat_perm)
+    return frobenius_cosine_similarity(W_true, W_hat_perm), col_ind
 
 def calculate_ccc(W_list):
     '''as defined by Brunet et al. 

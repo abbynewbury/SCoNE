@@ -74,8 +74,10 @@ def run_evaluation(run_name,file_path,sim, num_init, variable_name, variable, la
         rel_error_C = None
         for k,v in factor_matrices.items():
             if k=="W":
-                results.append([run_name,"W_C",0,reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v,),rel_error_G,rel_error_C])
-                results.append([run_name,"W_G",0,reconstruction_evaluation.best_permutation_similarity(sim["W_G"],v),rel_error_G,rel_error_C])
+                # get optimal permutation
+                _, optimal_permutation = reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v)
+                results.append([run_name,"W_C",0,reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v[:,optimal_permutation])[0],rel_error_G,rel_error_C])
+                results.append([run_name,"W_G",0,reconstruction_evaluation.best_permutation_similarity(sim["W_G"],v[:,optimal_permutation])[0],rel_error_G,rel_error_C])
             else:
                 assert True==False, "MVBC returning something other than W"
     else:
@@ -110,12 +112,14 @@ def run_evaluation(run_name,file_path,sim, num_init, variable_name, variable, la
             else: assert True == False, f"invalid run name {run_name}"
             for k,v in factor_matrices.items():
                 if k=="W":
-                    results.append([run_name,"W_C",run,reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v),rel_error_G,rel_error_C])
-                    results.append([run_name,"W_G",run,reconstruction_evaluation.best_permutation_similarity(sim["W_G"],v),rel_error_G,rel_error_C])
+                    _, optimal_permutation = reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v)
+                    results.append([run_name,"W_C",run,reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v[:,optimal_permutation]),rel_error_G,rel_error_C])
+                    results.append([run_name,"W_G",run,reconstruction_evaluation.best_permutation_similarity(sim["W_G"],v[:,optimal_permutation]),rel_error_G,rel_error_C])
+                elif k in ['H_G', 'H_C']:
+                    results.append([run_name,k,run,reconstruction_evaluation.best_permutation_similarity(sim[k],v[:optimal_permutation]),rel_error_G,rel_error_C])
                 else:
                     results.append([run_name,k,run,reconstruction_evaluation.best_permutation_similarity(sim[k],v),rel_error_G,rel_error_C])
     # calculate CCC
-    
     results = pd.DataFrame(results,columns=results_columns)
     results[variable_name] = variable
     results['lambda_val'] = lambda_val
