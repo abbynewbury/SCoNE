@@ -113,12 +113,12 @@ def run_evaluation(run_name,file_path,sim, num_init, variable_name, variable, la
             for k,v in factor_matrices.items():
                 if k=="W":
                     _, optimal_permutation = reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v)
-                    results.append([run_name,"W_C",run,reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v[:,optimal_permutation]),rel_error_G,rel_error_C])
-                    results.append([run_name,"W_G",run,reconstruction_evaluation.best_permutation_similarity(sim["W_G"],v[:,optimal_permutation]),rel_error_G,rel_error_C])
+                    results.append([run_name,"W_C",run,reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v[:,optimal_permutation])[0],rel_error_G,rel_error_C])
+                    results.append([run_name,"W_G",run,reconstruction_evaluation.best_permutation_similarity(sim["W_G"],v[:,optimal_permutation])[0],rel_error_G,rel_error_C])
                 elif k in ['H_G', 'H_C']:
-                    results.append([run_name,k,run,reconstruction_evaluation.best_permutation_similarity(sim[k],v[:optimal_permutation]),rel_error_G,rel_error_C])
+                    results.append([run_name,k,run,reconstruction_evaluation.best_permutation_similarity(sim[k],v[:,optimal_permutation])[0],rel_error_G,rel_error_C])
                 else:
-                    results.append([run_name,k,run,reconstruction_evaluation.best_permutation_similarity(sim[k],v),rel_error_G,rel_error_C])
+                    results.append([run_name,k,run,reconstruction_evaluation.best_permutation_similarity(sim[k],v)[0],rel_error_G,rel_error_C])
     # calculate CCC
     results = pd.DataFrame(results,columns=results_columns)
     results[variable_name] = variable
@@ -132,9 +132,9 @@ def get_summary_df(df,grouping_vars,value_var):
         df.groupby(grouping_vars)[value_var]
             .agg(n='count', mean='mean', std='std').reset_index()
     )
-    summary["ci95"] = 1.96 * summary["std"] / np.sqrt(summary["n"])         # normal approx 95% CI
-    summary["ymin"] = summary["mean"] - summary["ci95"]
-    summary["ymax"] = summary["mean"] + summary["ci95"]
+    summary["se"] = summary["std"] / np.sqrt(summary["n"])
+    summary["ymin"] = summary["mean"] - summary["se"]
+    summary["ymax"] = summary["mean"] + summary["se"]
     return summary
 
 def is_sparse(run_name): return run_name in {'SCoNE','SCoNE(Fro)','MVBC'} # runs that have sparsity params
@@ -150,7 +150,7 @@ def _one_run(tune_arg: dict, tmp_folder: str, variable_name: str, split):
     job_id, computation_time = _call_kwargs_deploy_train_run(ta)
 
     # Load sim (each worker reads its own file)
-    sim_path = os.path.join(tmp_folder, f"sim_{variable_name}_{variable_val}.pkl")
+    sim_path = os.path.join(tmp_folder, f"sim_{split}_{variable_name}_{variable_val}.pkl")
     with open(sim_path, "rb") as f:
         sim = pickle.load(f)
 
@@ -174,15 +174,27 @@ def run_one(variable_name, variable_range, output_dir):
     all_results = []
     # ---- simulate data ---- (goes in tmp folder)
     for variable in variable_range:
+        # tuning
         sim_kwargs = {"n":500,"M_C":20,"num_genes":20,"noise":0.5,"ZU_weight": 0.5,"sparsity":0,"rho":0.8,"seed":0} 
         sim_kwargs[variable_name] = variable
         sim = simulate_views(**sim_kwargs) 
-        with open(f'{tmp_folder}/sim_{variable_name}_{variable}.pkl','wb') as f:
+        with open(f'{tmp_folder}/sim_tune_{variable_name}_{variable}.pkl','wb') as f:
             pickle.dump(sim,f)
         # write G,C,Z to paths
-        pd.DataFrame(sim["G"]).to_csv(f'{tmp_folder}/G_{variable_name}_{variable}.csv')
-        pd.DataFrame(sim["C"]).to_csv(f'{tmp_folder}/C_{variable_name}_{variable}.csv')
-        pd.DataFrame(sim["Z"]).to_csv(f'{tmp_folder}/Z_{variable_name}_{variable}.csv')
+        pd.DataFrame(sim["G"]).to_csv(f'{tmp_folder}/G_tune_{variable_name}_{variable}.csv')
+        pd.DataFrame(sim["C"]).to_csv(f'{tmp_folder}/C_tune_{variable_name}_{variable}.csv')
+        pd.DataFrame(sim["Z"]).to_csv(f'{tmp_folder}/Z_tune_{variable_name}_{variable}.csv')
+
+        # training
+        sim_kwargs = {"n":500,"M_C":20,"num_genes":20,"noise":0.5,"ZU_weight": 0.5,"sparsity":0,"rho":0.8,"seed":1} 
+        sim_kwargs[variable_name] = variable
+        sim = simulate_views(**sim_kwargs) 
+        with open(f'{tmp_folder}/sim_train_{variable_name}_{variable}.pkl','wb') as f:
+            pickle.dump(sim,f)
+        # write G,C,Z to paths
+        pd.DataFrame(sim["G"]).to_csv(f'{tmp_folder}/G_train_{variable_name}_{variable}.csv')
+        pd.DataFrame(sim["C"]).to_csv(f'{tmp_folder}/C_train_{variable_name}_{variable}.csv')
+        pd.DataFrame(sim["Z"]).to_csv(f'{tmp_folder}/Z_train_{variable_name}_{variable}.csv')
 
     # ---- config -----
     lambda_options = [0, 1e-4, 1e-3, 1e-2, 1e-1, 1, 10]
@@ -222,9 +234,9 @@ def run_one(variable_name, variable_range, output_dir):
     # deploy tuning runs
     tuning_args, tuning_rows = [], []
     for idx, row in plan[plan['split']=='tune'].iterrows():
-        G_path = f'{tmp_folder}/G_{variable_name}_{row.variable}.csv'
-        C_path = f'{tmp_folder}/C_{variable_name}_{row.variable}.csv'
-        Z_path = f'{tmp_folder}/Z_{variable_name}_{row.variable}.csv'
+        G_path = f'{tmp_folder}/G_tune_{variable_name}_{row.variable}.csv'
+        C_path = f'{tmp_folder}/C_tune_{variable_name}_{row.variable}.csv'
+        Z_path = f'{tmp_folder}/Z_tune_{variable_name}_{row.variable}.csv'
         G = pd.read_csv(G_path, index_col=0).to_numpy(dtype=np.float64)
         C = pd.read_csv(C_path, index_col=0).to_numpy(dtype=np.float64)
         Z = pd.read_csv(Z_path, index_col=0).to_numpy(dtype=np.float64)
@@ -266,9 +278,9 @@ def run_one(variable_name, variable_range, output_dir):
     # deploy training runs
     training_args, training_rows = [], []
     for idx, row in plan[plan['split']=='train'].iterrows():
-        G_path = f'{tmp_folder}/G_{variable_name}_{row.variable}.csv'
-        C_path = f'{tmp_folder}/C_{variable_name}_{row.variable}.csv'
-        Z_path = f'{tmp_folder}/Z_{variable_name}_{row.variable}.csv'
+        G_path = f'{tmp_folder}/G_train_{variable_name}_{row.variable}.csv'
+        C_path = f'{tmp_folder}/C_train_{variable_name}_{row.variable}.csv'
+        Z_path = f'{tmp_folder}/Z_train_{variable_name}_{row.variable}.csv'
         G = pd.read_csv(G_path, index_col=0).to_numpy(dtype=np.float64)
         C = pd.read_csv(C_path, index_col=0).to_numpy(dtype=np.float64)
         Z = pd.read_csv(Z_path, index_col=0).to_numpy(dtype=np.float64)
