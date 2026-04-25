@@ -1,11 +1,11 @@
-#! /gpfs/commons/home/anewbury/miniconda/envs/jupyter/bin/python3
+#! /users/amn2217/miniconda3/envs/jupyter/bin/python3
 #SBATCH --job-name=test_reconstruction
 #SBATCH --nodes=1
-#SBATCH --mem=80G
-#SBATCH --cpus-per-task=8
+#SBATCH --mem=5G
+#SBATCH --cpus-per-task=1
 #SBATCH --time=24:00:00
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=anewbury@nygenome.org
+#SBATCH --mail-user=amn2217@cumc.columbia.edu
 #SBATCH --output=test_reconstruction.txt
 #SBATCH --error=test_reconstruction.txt
 
@@ -36,7 +36,7 @@ colors_dict = {
 }
 
 # make tmp dir
-root_dir = '/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno'
+root_dir = '/groups/gg2845_gp/amn2217/unsupervised_pheno'
 code_dir = f'{root_dir}/code'
 tmp_folder = f"{root_dir}/output/tmp"
 os.makedirs(tmp_folder, exist_ok=True)
@@ -76,8 +76,8 @@ def run_evaluation(run_name,file_path,sim, num_init, variable_name, variable, la
             if k=="W":
                 # get optimal permutation
                 _, optimal_permutation = reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v)
-                results.append([run_name,"W_C",0,reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v[:,optimal_permutation])[0],rel_error_G,rel_error_C])
-                results.append([run_name,"W_G",0,reconstruction_evaluation.best_permutation_similarity(sim["W_G"],v[:,optimal_permutation])[0],rel_error_G,rel_error_C])
+                results.append([run_name,"W_C",0,reconstruction_evaluation.frobenius_cosine_similarity(sim["W_C"],v[:,optimal_permutation]),rel_error_G,rel_error_C])
+                results.append([run_name,"W_G",0,reconstruction_evaluation.frobenius_cosine_similarity(sim["W_G"],v[:,optimal_permutation]),rel_error_G,rel_error_C])
             else:
                 assert True==False, "MVBC returning something other than W"
     else:
@@ -110,15 +110,15 @@ def run_evaluation(run_name,file_path,sim, num_init, variable_name, variable, la
                 rel_error_G = None
                 rel_error_C = None
             else: assert True == False, f"invalid run name {run_name}"
+            _, optimal_permutation = reconstruction_evaluation.best_permutation_similarity(sim["W_C"],factor_matrices["W"]) # calculate optimal permutation once on W and keep for rest
             for k,v in factor_matrices.items():
                 if k=="W":
-                    _, optimal_permutation = reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v)
-                    results.append([run_name,"W_C",run,reconstruction_evaluation.best_permutation_similarity(sim["W_C"],v[:,optimal_permutation])[0],rel_error_G,rel_error_C])
-                    results.append([run_name,"W_G",run,reconstruction_evaluation.best_permutation_similarity(sim["W_G"],v[:,optimal_permutation])[0],rel_error_G,rel_error_C])
+                    results.append([run_name,"W_C",run,reconstruction_evaluation.frobenius_cosine_similarity(sim["W_C"],v[:,optimal_permutation]),rel_error_G,rel_error_C])
+                    results.append([run_name,"W_G",run,reconstruction_evaluation.frobenius_cosine_similarity(sim["W_G"],v[:,optimal_permutation]),rel_error_G,rel_error_C])
                 elif k in ['H_G', 'H_C']:
-                    results.append([run_name,k,run,reconstruction_evaluation.best_permutation_similarity(sim[k],v[:,optimal_permutation])[0],rel_error_G,rel_error_C])
+                    results.append([run_name,k,run,reconstruction_evaluation.frobenius_cosine_similarity(sim[k],v[:,optimal_permutation]),rel_error_G,rel_error_C])
                 else:
-                    results.append([run_name,k,run,reconstruction_evaluation.best_permutation_similarity(sim[k],v)[0],rel_error_G,rel_error_C])
+                    results.append([run_name,k,run,reconstruction_evaluation.frobenius_cosine_similarity(sim[k],v),rel_error_G,rel_error_C])
     # calculate CCC
     results = pd.DataFrame(results,columns=results_columns)
     results[variable_name] = variable
@@ -324,14 +324,72 @@ def run_one(variable_name, variable_range, output_dir):
 
 
 if __name__ == "__main__": 
-    # ASSESS RUNS OVER CORRELATION 
-    run_one("rho",  [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0], output_dir=f'{root_dir}/output')
+    run_evaluation_only=True
+    output_dir = f'{root_dir}/output'
 
-    # ASSESS RUNS OVER WEIGHT OF COVARIATE SIGNAL
-    run_one("ZU_weight",  [0.25,0.5,0.75,1.0,1.5,2.0], output_dir=f'{root_dir}/output')
+    if not run_evaluation_only:
+        # ASSESS RUNS OVER CORRELATION 
+        run_one("rho",  [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0], output_dir=output_dir)
 
-    # ASSESS RUNS OVER NOISE
-    run_one("noise",  [0.0,0.5,1.0], output_dir=f'{root_dir}/output')
+        # ASSESS RUNS OVER WEIGHT OF COVARIATE SIGNAL
+        run_one("ZU_weight",  [0.25,0.5,0.75,1.0,1.5,2.0], output_dir=output_dir)
 
-    # ASSESS RUNS OVER SPARSITY
-    run_one("sparsity",  [0.0,0.25,0.5,0.75,0.9], output_dir=f'{root_dir}/output')
+        # ASSESS RUNS OVER NOISE
+        run_one("noise",  [0.0,0.5,1.0], output_dir=output_dir)
+
+        # ASSESS RUNS OVER SPARSITY
+        run_one("sparsity",  [0.0,0.25,0.5,0.75,0.9], output_dir=output_dir)
+
+    else:
+        variable_names = ["rho", "ZU_weight", "noise", "sparsity"]
+        for variable_name in variable_names:
+            print(variable_name)
+            all_results = []
+            # get tune results
+            split = "tune"
+            tune_record = pd.read_csv(f"{output_dir}/models/{variable_name}_run_record_tune.csv")
+            tune_record['out_path'] = tune_record['out_path'].str.replace('/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno',root_dir)
+            for i, row in tune_record.iterrows():
+                variable_val = row["variable"]
+                sim_path = os.path.join(tmp_folder, f"sim_{split}_{variable_name}_{variable_val}.pkl")
+                with open(sim_path, "rb") as f:
+                    sim = pickle.load(f)
+                results = run_evaluation(
+                    row["run_name"],
+                    row["out_path"],
+                    sim,
+                    row["num_init"],
+                    variable_name,
+                    variable_val,
+                    row["lambda_option"],
+                    rank=3,
+                    split=split
+                )
+                results['job_id'] = row['job_id']
+                all_results.append(results)
+
+            # get train results
+            split = "train"
+            train_record = pd.read_csv(f"{output_dir}/models/{variable_name}_run_record_train.csv")
+            train_record['out_path'] = train_record['out_path'].str.replace('/gpfs/commons/groups/gursoy_lab/anewbury/unsupervised_pheno',root_dir)
+            for i, row in train_record.iterrows():
+                variable_val = row["variable"]
+                sim_path = os.path.join(tmp_folder, f"sim_{split}_{variable_name}_{variable_val}.pkl")
+                with open(sim_path, "rb") as f:
+                    sim = pickle.load(f)
+                results = run_evaluation(
+                    row["run_name"],
+                    row["out_path"],
+                    sim,
+                    row["num_init"],
+                    variable_name,
+                    variable_val,
+                    row["lambda_option"],
+                    rank=3,
+                    split=split
+                )
+                results['job_id'] = row['job_id']
+                all_results.append(results)
+            all_results = pd.concat(all_results)
+            all_results.to_csv(f'{output_dir}/{variable_name}_results.csv')
+    
