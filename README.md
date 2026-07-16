@@ -37,7 +37,10 @@ joblib
 pandas
 ```
 
-Install the Python dependencies using
+We recommend installing these dependencies in a new Python virtual environment (e.g., using `venv` or Conda) to avoid conflicts with existing packages.
+
+
+Install the Python dependencies using:
 
 ```bash
 pip install -r requirements.txt
