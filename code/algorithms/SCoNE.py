@@ -316,13 +316,6 @@ def alternating_opt(
     test=False,
     H_G=None, H_C=None, U_G=None, U_C=None
 ):
-    '''
-    To remove sparsity (CoNE) - set all lambda = 0
-    To remove covariates Z (HNMF, SHNMF) - set Z = np.zeros((Z.shape[0],Z.shape[1]))
-    To run G only (GNMF)
-    To run C only (CNMF)
-    To run with all Frobenius norm (SCoNE (Fro))
-    '''
     def one_block_update(name, X):
         x0 = X.flatten(order='F') 
 

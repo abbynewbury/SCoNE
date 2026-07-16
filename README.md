@@ -34,6 +34,7 @@ numpy
 scipy
 scikit-learn
 joblib
+pandas
 ```
 
 Install the Python dependencies using
@@ -43,7 +44,7 @@ pip install -r requirements.txt
 ```
 
 #### Optional R dependencies (for running comparator methods)
-To use our wrappers to run comparator methods, the following R packages must be installed:
+To use the provided wrappers for comparator methods, the following R packages must be installed:
 
 ```text
 rgwas
@@ -52,12 +53,14 @@ jsonlite
 mvcluster
 ```
 
+The `rgwas` and `mvcluster` packages are not available on CRAN and should be installed according to the installation instructions provided by its authors.
+
 ## Installation Guide
 
 ### Install from Github
 
 ```bash
-git clone git@github.com:G2Lab/SCoNE.git
+git clone https://github.com/G2Lab/SCoNE.git
 cd SCoNE
 pip install -r requirements.txt
 ```
