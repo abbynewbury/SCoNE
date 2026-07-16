@@ -1,7 +1,6 @@
 import numpy as np
 from collections import defaultdict
 from scipy.special import xlogy
-from joblib import Parallel, delayed
 import json
 import pickle
 from algorithms._initialize_nmf import _initialize_nmf
@@ -470,6 +469,85 @@ def SCoNE_parallel(
     H_G=None, H_C=None, U_G=None, U_C=None, 
     write_all_init=False, write_all_init_path='' # write all init out
     ):
+    """
+    Perform Sparse Covariate-aware Non-negative Matrix Factorization (SCoNE).
+
+    Parameters
+    ----------
+    G : ndarray of shape (N, M_G) or None
+        Genetic data matrix. Can be set to None to exclude from decomposition.
+
+    C : ndarray of shape (N, M_C) or None
+        Clinical data matrix. Can be set to None to exclude from decomposition.
+
+    Z : ndarray of shape (N, M_Z) or None
+        Covariate matrix. Should contain an intercept. Can be set to None to exclude from decomposition.
+
+    rank : int
+       Rank of decomposition.
+
+    init : {'random', 'nndsvd', 'nndsvda'}, default='random'
+        Initialization method for the factor matrices.
+
+    num_init : int, default=1
+        Number of initializations. The solution with the lowest final
+        objective value is returned.
+
+    n_jobs : int, default=1
+        Number of worker processes used to run multiple initializations in parallel.
+
+    alpha : float, default=0
+        L2 regularization parameter for W. Should be set when lambda_H_G or lambda_H_C is greater than 0.
+
+    lambda_H_G : float, default=0
+        L1 sparsity parameter for H_G.
+
+    lambda_H_C : float, default=0
+        L1 sparsity parameter for H_C.
+
+    lambda_Gloss : float, default=1
+        Weight controlling the relative contribution of the genetic and
+        clinical reconstruction losses.
+
+    G_loss_type, C_loss_type : {'kl_div', 'fro', None}, default='kl_div'
+        Reconstruction loss used for each data modality. Setting a loss type
+        to None excludes that modality from the optimization.
+
+    max_outer, min_outer : int
+        Maximum and minimum number of outer optimization iterations.
+
+    tol : float
+        Convergence tolerance for the outer optimization.
+
+    max_inner, rho, sigma, inner_ftol, max_ls
+        Parameters controlling the projected gradient descent line search.
+
+    post_hoc_rescale : bool, default=False
+        Whether to rescale the learned factor matrices after optimization. If test=True this is always False.
+
+    test : bool, default=False
+        If True, only the participant factor matrix W is optimized while the
+        remaining factor matrices are held fixed.
+
+    H_G, H_C, U_G, U_C : ndarray, optional
+        Precomputed factor matrices used when test=True.
+
+    write_all_init : bool, default=False
+        Whether to save the results from every initialization.
+
+    write_all_init_path : str, default=''
+        Directory in which to save initialization results.
+
+    Returns
+    -------
+    factor_matrices : dict
+        Dictionary containing the learned factor matrices.
+
+    loss_function : dict
+        Dictionary containing the total objective value, individual loss
+        components, factor matrix norms, sparsity measures, and the final
+        cophenetic correlation coefficient.
+    """
 
     kwargs = {"G":G,"C":C,"Z":Z,              # true matrices
             "rank":rank, "init":init,
