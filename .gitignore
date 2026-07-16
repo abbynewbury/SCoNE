@@ -1,2 +1,9 @@
 archive/*
 tf_env.yml
+
+# Jupyter
+**/.ipynb_checkpoints/
+
+# Python
+**/__pycache__/
+*.py[cod]

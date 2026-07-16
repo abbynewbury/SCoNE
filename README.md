@@ -33,6 +33,7 @@ Python 3.10+
 numpy
 scipy
 scikit-learn
+joblib
 ```
 
 Install the Python dependencies using

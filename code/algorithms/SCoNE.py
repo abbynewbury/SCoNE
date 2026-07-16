@@ -1,6 +1,7 @@
 import numpy as np
 from collections import defaultdict
 from scipy.special import xlogy
+from joblib import Parallel, delayed
 import json
 import pickle
 from algorithms._initialize_nmf import _initialize_nmf
