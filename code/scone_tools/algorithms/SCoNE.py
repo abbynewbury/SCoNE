@@ -1,4 +1,8 @@
 import numpy as np
+try:
+    import cupy as cp # if GPU
+except ImportError:
+    cp = None
 from collections import defaultdict
 from scipy.special import xlogy
 from joblib import Parallel, delayed
@@ -461,7 +465,8 @@ def SCoNE_parallel(
     # if test is True, W is the only factor matrix that will be optimized (for train/test split)
     test=False,
     H_G=None, H_C=None, U_G=None, U_C=None, 
-    write_all_init=False, write_all_init_path='' # write all init out
+    write_all_init=False, write_all_init_path='', # write all init out
+    use_gpu=False
     ):
     """
     Perform Sparse Covariate-aware Non-negative Matrix Factorization (SCoNE).
@@ -532,6 +537,9 @@ def SCoNE_parallel(
     write_all_init_path : str, default=''
         Directory in which to save initialization results.
 
+    use_gpu: bool, default=False
+        If True, use CuPy for GPU-accelerated computation. If False, use NumPy on the CPU.
+
     Returns
     -------
     factor_matrices : dict
@@ -542,6 +550,24 @@ def SCoNE_parallel(
         components, factor matrix norms, sparsity measures, and the final
         cophenetic correlation coefficient.
     """
+
+    # Use numpy-compatible cupy API for GPU computation
+    if use_gpu:
+        try:
+            import cupy as np
+        except ImportError:
+            raise ImportError(
+            "CuPy is required when use_gpu=True."
+            )
+        if G is not None: G = np.asarray(G)
+        if C is not None: C = np.asarray(C)
+        if Z is not None: Z = np.asarray(Z)
+        if H_G is not None: H_G = np.asarray(H_G)
+        if H_C is not None: H_C = np.asarray(H_C)
+        if U_G is not None: U_G = np.asarray(U_G)
+        if U_C is not None: U_C = np.asarray(U_C)
+    else:
+        import numpy as np
 
     kwargs = {"G":G,"C":C,"Z":Z,              # true matrices
             "rank":rank, "init":init,
@@ -567,6 +593,14 @@ def SCoNE_parallel(
         results = Parallel(n_jobs=n_jobs, prefer="processes")(
             delayed(alternating_opt)(
             **kwargs) for run in range(num_init))
+
+    # FOR: transition back to numpy array if using cupy on GPU
+    if use_gpu: 
+        for result in results:
+            result[1] = {
+                key: cp.asnumpy(value) if isinstance(value, cp.ndarray) else value
+                for key, value in result[1].items()
+            }
     
     # FOR: writing and calculating cophenetic correlation coefficient
     W_list = []
