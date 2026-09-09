@@ -46,6 +46,8 @@ Install the Python dependencies using:
 pip install -r requirements.txt
 ```
 
+Optional: To run SCoNE on GPU, install the appropriate version of CuPY for your CUDA installation. An example is provided in `requirements-gpu.txt`.
+
 #### Optional R dependencies (for running comparator methods)
 To use the provided wrappers for comparator methods, the following R packages must be installed:
 
