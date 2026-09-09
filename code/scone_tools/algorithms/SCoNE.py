@@ -8,8 +8,8 @@ from scipy.special import xlogy
 from joblib import Parallel, delayed
 import json
 import pickle
-from algorithms._initialize_nmf import _initialize_nmf
-from evaluation.reconstruction_evaluation import calculate_ccc
+from ._initialize_nmf import _initialize_nmf
+from ..evaluation.reconstruction_evaluation import calculate_ccc
 
 def compute_loss(X,X_hat,loss_type):
     if loss_type == 'kl_div':
