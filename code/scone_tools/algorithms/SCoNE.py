@@ -6,6 +6,11 @@ import json
 import pickle
 from ._initialize_nmf import _initialize_nmf
 from ..evaluation.reconstruction_evaluation import calculate_ccc
+import os, psutil # TODO: REMOVE
+
+def print_ram(label):# TODO: REMOVE + any references to it
+    p = psutil.Process(os.getpid())
+    print(f"{label}: {p.memory_info().rss / 1024**3:.2f} GB", flush=True)
 
 def compute_loss(X,X_hat,loss_type,xp=np):
     if loss_type == 'kl_div':
@@ -382,6 +387,7 @@ def alternating_opt(
         xp = cp
     else:
         xp = np
+
     # Move arrays to selected backend
     if G is not None: G = xp.asarray(G)
     if C is not None: C = xp.asarray(C)
@@ -392,7 +398,6 @@ def alternating_opt(
     if H_C is not None: H_C = xp.asarray(H_C)
     if U_G is not None: U_G = xp.asarray(U_G)
     if U_C is not None: U_C = xp.asarray(U_C)
-
 
     # initial objective
     loss_dict = defaultdict(list)
@@ -441,7 +446,7 @@ def alternating_opt(
         if ((f_prev - f_cur) / max(1.0, abs(f_prev)) < tol) and _ >= min_outer:
             break
         f_prev = f_cur
-    
+        
     if not test:
         if post_hoc_rescale is True:
             # Normalize columns of W to L2 norm and scale rows of H to resolve scaling ambiguity
@@ -599,7 +604,7 @@ def SCoNE_parallel(
         results = Parallel(n_jobs=n_jobs, prefer="processes")(
             delayed(alternating_opt)(
             **kwargs) for run in range(num_init))
-    
+
     # FOR: writing and calculating cophenetic correlation coefficient
     W_list = []
     for run, result in enumerate(results):
@@ -612,6 +617,7 @@ def SCoNE_parallel(
         W_list.append(result[0]['W'])
     coph_corr = calculate_ccc(W_list)
     # FOR: writing and calculating cophenetic correlation coefficient
+    print_ram("done calculating coph corr coefficient")
     
     final_factor_matrices, final_loss_dict = min(
         results,
