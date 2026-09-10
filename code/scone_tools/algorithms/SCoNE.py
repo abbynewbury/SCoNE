@@ -6,11 +6,7 @@ import json
 import pickle
 from ._initialize_nmf import _initialize_nmf
 from ..evaluation.reconstruction_evaluation import calculate_ccc
-import os, psutil # TODO: REMOVE
 
-def print_ram(label):# TODO: REMOVE + any references to it
-    p = psutil.Process(os.getpid())
-    print(f"{label}: {p.memory_info().rss / 1024**3:.2f} GB", flush=True)
 
 def compute_loss(X,X_hat,loss_type,xp=np):
     if loss_type == 'kl_div':
@@ -494,7 +490,7 @@ def SCoNE_parallel(
     test=False,
     H_G=None, H_C=None, U_G=None, U_C=None, 
     write_all_init=False, write_all_init_path='', # write all init out
-    use_gpu=False
+    use_gpu=False, cophcorr_idx_path=None
     ):
     """
     Perform Sparse Covariate-aware Non-negative Matrix Factorization (SCoNE).
@@ -568,6 +564,9 @@ def SCoNE_parallel(
     use_gpu: bool, default=False
         If True, use CuPy for GPU-accelerated computation. If False, use NumPy on the CPU.
 
+    cophcorr_idx_path: str, default=None
+        If not None, write the subset of idxs used to calculate cophenetic correlation coefficient
+
     Returns
     -------
     factor_matrices : dict
@@ -615,9 +614,10 @@ def SCoNE_parallel(
                 pickle.dump(result[0], f)
                 # Assign each sample to its strongest component
         W_list.append(result[0]['W'])
-    coph_corr = calculate_ccc(W_list)
+    coph_corr, idx = calculate_ccc(W_list)
+    if cophcorr_idx_path is not None:
+        np.save(cophcorr_idx_path, idx)
     # FOR: writing and calculating cophenetic correlation coefficient
-    print_ram("done calculating coph corr coefficient")
     
     final_factor_matrices, final_loss_dict = min(
         results,

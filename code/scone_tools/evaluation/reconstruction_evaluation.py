@@ -28,21 +28,35 @@ def best_permutation_similarity(W_true, W_hat):
     W_hat_perm = W_hat[:, col_ind] # optimal permutation
     return frobenius_cosine_similarity(W_true, W_hat_perm), col_ind
 
-def calculate_ccc(W_list):
+def calculate_ccc(W_list, max_samples=5000, random_state=0):
     '''as defined by Brunet et al. 
-    W_list should be sample clusters from random intializations (i.e. len(W_list) = num_init)
+       W_list:
+        List of W matrices from different initializations.
+       max_samples:
+        Maximum number of subjects used to compute CCC.
+        If None, use all subjects.
     '''
-    consensus = None 
+    assert len(W_list) > 0
+    N = W_list[0].shape[0]
+    assert all(W.shape[0] == N for W in W_list)
+
+    if max_samples is not None and N > max_samples:
+        rng = np.random.default_rng(random_state)
+        idx = rng.choice(N, size=max_samples, replace=False)
+    else:
+        idx = np.arange(N)
+    
+    n = len(idx)
+    consensus = np.zeros((n, n), dtype=np.float32)
+    
     for W in W_list:
         # assign hard clusters
-        labels = np.argmax(W, axis=1)
-        if consensus is None:
-            consensus = np.zeros((len(labels), len(labels)), dtype=float)
+        labels = np.argmax(W[idx,:], axis=1)
         # Co-membership matrix for this run
-        consensus += (labels[:, None] == labels[None, :]).astype(float)
-    assert len(W_list) > 0
+        consensus += labels[:, None] == labels[None, :]
     consensus /= len(W_list) # get average over runs
-    dist_condensed = squareform(1.0 - consensus, checks=False)
+    np.subtract(1.0, consensus, out=consensus)
+    dist_condensed = squareform(consensus, checks=False)
     HC_linkage = linkage(dist_condensed, method="average")
     coph_corr, _ = cophenet(HC_linkage, dist_condensed)
-    return coph_corr
+    return coph_corr, idx
