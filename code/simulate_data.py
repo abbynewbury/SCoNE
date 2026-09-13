@@ -1,4 +1,3 @@
-
 import numpy as np
 
 # CODE TO SIMULATE DATA
@@ -8,64 +7,107 @@ def proj_nonneg(x):
         return x
     return np.maximum(x, 0)
 
-def make_correlated_matrices(m, r, rho, seed=1):
+def make_correlated_matrices(r, X, y_nonneg=False, seed=0):
+    # random matrix always created from N(0,1) distribution
     rng = np.random.default_rng(seed)
-    Z = proj_nonneg(rng.normal(size=(m, r)))
-    E = proj_nonneg(rng.normal(size=(m, r)))
-    W1 = Z
-    W2 = rho * Z + np.sqrt(1 - rho**2) * E
-    if rho==1:
-        assert np.allclose(W1, W2)
-    return W1, W2
+    Y = rng.normal(size=X.shape)
+    if y_nonneg:
+        Y = proj_nonneg(Y)
+    return_mat = r*X + np.sqrt(1 - r**2) * Y
+    if r==1:
+        assert np.allclose(X, return_mat)
+    return return_mat
 
-def simulate_views(n=2500, num_genes=100, M_C=100, M_Z=3, rank=3, seed=0, ZU_weight=1, noise=0, sparsity=0, rho=1, Z_noise=0):
+def simulate_views(n=1000, M_G=20, M_C=20, 
+                   rank=3, seed=0, gamma=5, noise=0,
+                   sparsity=0.2, rG=0, rGC=0, rZ=0,
+                   signed_cov_effects=False,subgroup_structure=True,
+                   overdispersion_nu=0
+                  ):
     """
-    G:  n x num_genes  (Poisson with rate WH_g.T + ZU_g.T)
-    C:  n x M_C  (Poisson with rate WH_c.T + ZU_c.T)
-
-    Z: n x M_Z covariates (non-negative random numbers)
-
-      W   : n x rank
-      H_g : num_genes x rank
-      U_g : M_Z x num_genes
-      H_c: n x M_C
-      U_c: M_Z x M_C
+    n: number of participants
+    M_G: number of genetic features
+    M_C: number of clinical features
+    rank: number of subgroups
+    seed: random seed
+    gamma: ratio of marginal variance of covariate vs. subgroup component for G
+    noise: weighting of random noise
+    sparsity: controls sparsity of H_G and H_C
+    rG: controls similarity between genetic subgroups
+    rGC: controls similarity between corresponding clinical and genetic subgroups
+    rZ: controls similarity between covariate and subgroup 1
+    signed_cov_effects: no non-negative projection for U_G and U_C (bool)
+    subgroup_structure: whether to include WHT in means of G and C (bool)
+    overdispersion_nu: paramater to control overdispersion in negative binomial distribution for C, if !=0
     """
+
     rng = np.random.default_rng(seed)
-
-    # 1. Sample factor matrices
-    # Sample nonnegative factors so Poisson rates are valid
-    W_C, W_G = make_correlated_matrices(n, rank, rho,seed=seed+1)
-    H_C = proj_nonneg(rng.normal(size=(M_C, rank)))
-    # generate linked markers
-    H_G = proj_nonneg(rng.normal(size=(num_genes, rank)))
-    # generate superpop shift for each feature
-    U_C = proj_nonneg(rng.normal(size=(M_C, M_Z+1)))
-    U_G =  proj_nonneg(rng.normal(size=(num_genes, M_Z+1)))
-
-    # generate M_Z Z columns
-    Z = proj_nonneg(rng.normal(size=(n, M_Z)))
-    # add an intercept
-    Z = np.column_stack([np.ones(Z.shape[0]), Z])
-
-    #2. impose sparsity (P(W_ij=0)=sparsity)
-    mask = np.random.rand(*(M_C,rank)) > sparsity
-    H_C = H_C * mask
-    mask = np.random.rand(*(num_genes,rank)) > sparsity
-    H_G = H_G * mask
-
-
-    avg_corr = np.mean([np.corrcoef(W_C[:,k], W_G[:,k])[0,1]
-                    for k in range(W_C.shape[1])])
-    assert np.abs(avg_corr - rho) < 0.1
     
-    # Means
-    M_c = W_C@H_C.T + (ZU_weight)*Z@U_C.T + (noise)*proj_nonneg(rng.normal(size=(n, M_C)))
-    M_g = W_G@H_G.T + (ZU_weight)*Z@U_G.T + (noise)*proj_nonneg(rng.normal(size=(n, num_genes)))
-
+    if subgroup_structure:
+        # 1. Simulate W by random assignment to rank subgroups
+        sizes = np.full(rank, n//rank) # evenly balance subgroups
+        sizes[:n % rank] += 1
+        labels = np.repeat(np.arange(rank), sizes)
+        rng.shuffle(labels)
+        W = np.zeros((n, rank), dtype=int)
+        W[np.arange(n), labels] = 1
+        
+        # 2. Simulate H_G with genetic architecture similarity rG
+        Sigma = (1-rG)*np.eye(rank,rank) + np.full((rank,rank),rG)
+        H_G = proj_nonneg(rng.multivariate_normal(np.zeros((rank)), Sigma, size=M_G))
+        
+        # 3. Simulate H_C with similarity to genetic subgroups rGC
+        H_C = proj_nonneg(make_correlated_matrices(rGC, H_G, seed=seed))
+        
+        # 4. impose sparsity (P(W_ij=0)=sparsity)
+        mask = np.random.rand(*(M_C,rank)) > sparsity
+        H_C = H_C * mask
+        mask = np.random.rand(*(M_G,rank)) > sparsity
+        H_G = H_G * mask
+    
+        # 5. Generate covariate with similarity to subgroup 1 structure
+        z = make_correlated_matrices(rZ, W[:,1], y_nonneg=True, seed=seed)
+    
+    else: 
+        assert rZ==0, "set rZ to 0 if no subgroup structure"
+        z = proj_nonneg(rng.normal(size=n))
+    
+    # 5. Generate covariate matrix
+    assert (z>=0).all()
+    Z = np.column_stack([np.ones(len(z)), z])
+    
+    # 6. Simulate covariate effects
+    U_C = rng.normal(size=(M_C, Z.shape[1]))
+    U_G = rng.normal(size=(M_G, Z.shape[1]))
+    if not signed_cov_effects:
+        U_C = proj_nonneg(U_C)
+        U_G = proj_nonneg(U_G)
+    
+    # 7. Generate matrix means
+    if subgroup_structure:
+        mu_C = W@H_C.T + Z@U_C.T + (noise)*proj_nonneg(rng.normal(size=(n, M_C)))
+        # standardize A and B to have same marginal standard deviation
+        A = W @ H_G.T
+        B = Z @ U_G.T
+        mu_G = A + gamma*(np.std(A) / np.std(B))*B + (noise)*proj_nonneg(rng.normal(size=(n, M_G)))
+    else:
+        mu_C = Z@U_C.T + (noise)*proj_nonneg(rng.normal(size=(n, M_C)))
+        mu_G = Z@U_G.T + (noise)*proj_nonneg(rng.normal(size=(n, M_G)))
+    
+    if signed_cov_effects:
+        mu_C = np.exp(mu_C)
+        mu_G = np.exp(mu_G)
+    
     # Generate the two observed matrices
-    G = rng.poisson(M_g).astype(float)  
-    C = rng.poisson(M_c).astype(float)     
-
-    return {"G": G, "C": C, "Z":Z, "W_C": W_C, "W_G":W_G, "H_G": H_G, "H_C": H_C, "U_G": U_G, "U_C": U_C}
-
+    G = rng.poisson(mu_G).astype(float)  
+    if overdispersion_nu==0:
+        C = rng.poisson(mu_C).astype(float) 
+    else:
+        p_nb = 1 / (1 + overdispersion_nu**2 * mu_C)
+        n_nb = 1 / overdispersion_nu**2
+        C = rng.negative_binomial(n_nb, p_nb).astype(float) 
+    if subgroup_structure:
+        return_dict = {"G": G, "C": C, "Z":Z, "W_C": W, "H_G": H_G, "H_C": H_C, "U_G": U_G, "U_C": U_C}
+    else:
+        return_dict = {"G": G, "C": C, "Z":Z, "U_G": U_G, "U_C": U_C}
+    return return_dict

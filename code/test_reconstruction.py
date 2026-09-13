@@ -1,14 +1,3 @@
-#! /users/amn2217/miniconda3/envs/jupyter/bin/python3
-#SBATCH --job-name=test_reconstruction
-#SBATCH --nodes=1
-#SBATCH --mem=5G
-#SBATCH --cpus-per-task=1
-#SBATCH --time=24:00:00
-#SBATCH --mail-type=ALL
-#SBATCH --mail-user=amn2217@cumc.columbia.edu
-#SBATCH --output=test_reconstruction.txt
-#SBATCH --error=test_reconstruction.txt
-
 import pandas as pd
 from itertools import product
 import submitit
@@ -22,26 +11,14 @@ import json
 import pickle
 from sklearn.model_selection import train_test_split
 
-colors_dict = {
-"SCoNE":"#2f4b7c",
-"MVBC":"#665191",
-"RGWAS":"#a05195",  
-"C-NMF":"#d45087",  
-"C-CoNE":"#f95d6a",  
-"G-NMF":"#ff7c43",  
-"G-CoNE":"#ffa600",  
-"HNMF":"#2ca02c",  
-"SCoNE(Fro)":"#1f77b4",
-"CoNE":"#17becf"
-}
-
 # make tmp dir
-root_dir = '/groups/gg2845_gp/amn2217/unsupervised_pheno'
+root_dir = '/home/jupyter/repos/SCoNE'
 code_dir = f'{root_dir}/code'
 tmp_folder = f"{root_dir}/output/tmp"
 os.makedirs(tmp_folder, exist_ok=True)
 sys.path.append(code_dir)
 import evaluation.reconstruction_evaluation as reconstruction_evaluation
+import evaluation.cluster_evaluation as cluster_evaluation
 from simulate_data import *
 from utilities import _call_kwargs_deploy_train_run
 import pickle
@@ -175,7 +152,7 @@ def run_one(variable_name, variable_range, output_dir):
     # ---- simulate data ---- (goes in tmp folder)
     for variable in variable_range:
         # tuning
-        sim_kwargs = {"n":500,"M_C":20,"num_genes":20,"noise":0.5,"ZU_weight": 0.5,"sparsity":0,"rho":0.8,"seed":0} 
+        sim_kwargs = {"n":1000,"M_C":20,"num_genes":20,"noise":0.5,"ZU_weight": 0.5,"sparsity":0,"rho":0.8,"seed":0} 
         sim_kwargs[variable_name] = variable
         sim = simulate_views(**sim_kwargs) 
         with open(f'{tmp_folder}/sim_tune_{variable_name}_{variable}.pkl','wb') as f:
@@ -324,7 +301,7 @@ def run_one(variable_name, variable_range, output_dir):
 
 
 if __name__ == "__main__": 
-    run_evaluation_only=True
+    run_evaluation_only=False
     output_dir = f'{root_dir}/output'
 
     if not run_evaluation_only:
