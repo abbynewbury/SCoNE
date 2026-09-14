@@ -599,22 +599,20 @@ def SCoNE_parallel(
     # log wall time and peak mem
     process = psutil.Process(os.getpid())
     peak_cpu = process.memory_info().rss
-    peak_gpu = 0
     stop = False
-
-    if use_gpu:
-        pool = cp.get_default_memory_pool()
-        pool.free_all_blocks()
-        cp.cuda.Stream.null.synchronize()
     
     def monitor():
-        nonlocal peak_cpu, peak_gpu
+        nonlocal peak_cpu
         while not stop:
             peak_cpu = max(peak_cpu, process.memory_info().rss)
-            if use_gpu:
-                peak_gpu = max(peak_gpu, pool.used_bytes())
             time.sleep(0.05)
 
+    if use_gpu:
+        try:
+            import cupy as cp
+        except ImportError:
+            raise ImportError("CuPy required when use_gpu=True.")
+        cp.cuda.Stream.null.synchronize()
     
     thread = threading.Thread(target=monitor)
     thread.start()
@@ -640,8 +638,7 @@ def SCoNE_parallel(
     
     benchmark_info = {
         "wall_time": wall_time,
-        "peak_cpu_gb": peak_cpu / 1024**3 if n_jobs == 1 else None,
-        "peak_gpu_gb": peak_gpu / 1024**3 if use_gpu else None,
+        "peak_cpu_gb": peak_cpu / 1024**3 if (n_jobs == 1 and not use_gpu) else None,
     }
 
     # FOR: writing and calculating cophenetic correlation coefficient
