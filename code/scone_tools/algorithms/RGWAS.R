@@ -29,5 +29,11 @@ Z <- read_matrix(Z_path)
 stopifnot(any(apply(Z, 2, function(col) all(col == 1))))
 covars <- cbind(Z,G)
 C_binary <- (C != 0) + 0L
+start_time <- proc.time()[["elapsed"]]
 result <- mfmr(Yb=C_binary,  Yq=NULL, G=covars, K=rank, nrun=num_init)
-cat(toJSON(result, auto_unbox = TRUE))
+wall_time <- proc.time()[["elapsed"]] - start_time
+output <- list(
+    result = result,
+    wall_time = wall_time
+)
+cat(toJSON(output, auto_unbox = TRUE))

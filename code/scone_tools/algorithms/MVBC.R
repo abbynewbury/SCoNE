@@ -32,6 +32,7 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
   # --- Run MVBC ---
   remaining <- seq_len(nrow(G)) # indices of individuals still under consideration
   W <- matrix(0, nrow = dim(G)[1], ncol = rank)
+  start_time <- proc.time()[["elapsed"]]
   for (i in seq_len(rank)){
     G_i <- G[remaining, , drop = FALSE]
     C_i <- C[remaining, , drop = FALSE]
@@ -53,10 +54,11 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
     remaining <- remaining[!drop_mask]  
 
   }
+  wall_time <- proc.time()[["elapsed"]] - start_time
   factor_matrices <- list(W = W)
   loss_history <- list(0) # just a placeholder
 
-  output <- list(factor_matrices = factor_matrices,loss_history = loss_history)
+  output <- list(factor_matrices = factor_matrices,loss_history = loss_history,wall_time = wall_time)
   cat(toJSON(output, auto_unbox = TRUE))
 }
 

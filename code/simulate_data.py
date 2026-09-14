@@ -107,7 +107,7 @@ def simulate_views(n=1000, M_G=20, M_C=20,
         n_nb = 1 / overdispersion_nu**2
         C = rng.negative_binomial(n_nb, p_nb).astype(float) 
     if subgroup_structure:
-        return_dict = {"G": G, "C": C, "Z":Z, "W_C": W, "H_G": H_G, "H_C": H_C, "U_G": U_G, "U_C": U_C}
+        return_dict = {"G": G, "C": C, "Z":Z, "W": W, "H_G": H_G, "H_C": H_C, "U_G": U_G, "U_C": U_C}
     else:
         return_dict = {"G": G, "C": C, "Z":Z, "U_G": U_G, "U_C": U_C}
     return return_dict
