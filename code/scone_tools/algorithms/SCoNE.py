@@ -6,8 +6,11 @@ import json
 import pickle
 from ._initialize_nmf import _initialize_nmf
 from ..evaluation.reconstruction_evaluation import calculate_ccc
-
-
+import os
+import time
+import threading
+import psutil
+    
 def compute_loss(X,X_hat,loss_type,xp=np):
     if loss_type == 'kl_div':
         return xp.sum(-xlogy(X,X_hat) + xlogy(X,X) + X_hat - X) 
@@ -592,7 +595,31 @@ def SCoNE_parallel(
             "test":test,
             "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C,
             "use_gpu":use_gpu}
+    
+    # log wall time and peak mem
+    process = psutil.Process(os.getpid())
+    peak_cpu = process.memory_info().rss
+    peak_gpu = 0
+    stop = False
 
+    if use_gpu:
+        pool = cp.get_default_memory_pool()
+        pool.free_all_blocks()
+        cp.cuda.Stream.null.synchronize()
+    
+    def monitor():
+        nonlocal peak_cpu, peak_gpu
+        while not stop:
+            peak_cpu = max(peak_cpu, process.memory_info().rss)
+            if use_gpu:
+                peak_gpu = max(peak_gpu, pool.used_bytes())
+            time.sleep(0.05)
+
+    
+    thread = threading.Thread(target=monitor)
+    thread.start()
+    start = time.perf_counter()
+    
     if n_jobs==1:
         results = []
         for run in range(num_init):
@@ -603,6 +630,19 @@ def SCoNE_parallel(
         results = Parallel(n_jobs=n_jobs, prefer="processes")(
             delayed(alternating_opt)(
             **kwargs) for run in range(num_init))
+    
+    if use_gpu:
+        cp.cuda.Stream.null.synchronize()
+    
+    wall_time = time.perf_counter() - start
+    stop = True
+    thread.join()
+    
+    benchmark_info = {
+        "wall_time": wall_time,
+        "peak_cpu_gb": peak_cpu / 1024**3 if n_jobs == 1 else None,
+        "peak_gpu_gb": peak_gpu / 1024**3 if use_gpu else None,
+    }
 
     # FOR: writing and calculating cophenetic correlation coefficient
     W_list = []
@@ -625,4 +665,4 @@ def SCoNE_parallel(
     )
     final_loss_dict['coph_corr'] = coph_corr
     
-    return final_factor_matrices, final_loss_dict
+    return final_factor_matrices, final_loss_dict, benchmark_info

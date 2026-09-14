@@ -3,3 +3,5 @@ scipy>=1.10
 scikit-learn>=1.3
 joblib>=1.3
 pandas
+# Required for runtime and memory benchmarking
+psutil

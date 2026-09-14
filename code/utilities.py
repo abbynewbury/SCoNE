@@ -13,32 +13,6 @@ import algorithms.RGWASWrapper as RGWASWrapper
 import time
 
 
-# Algorithm comparison functions
-def profile_function(func, *args, mem_target='function', **kwargs):
-    gc.collect()
-    start_time = time.process_time()
-    start_user_time = os.times().user
-    if mem_target == 'function':
-        start_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    elif mem_target == 'subprocess':
-        start_mem = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-
-    result = func(*args, **kwargs)  # Run the function
-    gc.collect()
-
-    if mem_target == 'function':
-        end_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    else:  # 'subprocess'
-        end_mem = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-    max_mem = (end_mem - start_mem) / 1024  # KB to MB
-    cpu_time = time.process_time() - start_time
-    user_time = os.times().user - start_user_time
-
-    if isinstance(result, tuple):
-        return (*result, max_mem, cpu_time, user_time)
-    else:
-        return result, max_mem, cpu_time, user_time
-
 
 def deploy_train_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambda_Gloss=None,
                     G_path='',C_path='',Z_path='',r_path='',rank=3, num_init=1, n_jobs=1,
