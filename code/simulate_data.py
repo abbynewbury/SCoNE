@@ -60,9 +60,9 @@ def simulate_views(n=1000, M_G=20, M_C=20,
         H_C = proj_nonneg(make_correlated_matrices(rGC, H_G, seed=seed))
         
         # 4. impose sparsity (P(W_ij=0)=sparsity)
-        mask = np.random.rand(*(M_C,rank)) > sparsity
+        mask = rng.random((M_C,rank)) > sparsity
         H_C = H_C * mask
-        mask = np.random.rand(*(M_G,rank)) > sparsity
+        mask = rng.random((M_G,rank)) > sparsity
         H_G = H_G * mask
     
         # 5. Generate covariate with similarity to subgroup 1 structure

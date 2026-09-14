@@ -91,7 +91,7 @@ G = pd.read_csv(f'{parent_dir}/example_data/G.csv', index_col=0).to_numpy(dtype=
 C = pd.read_csv(f'{parent_dir}/example_data/C.csv', index_col=0).to_numpy(dtype=float)
 Z = pd.read_csv(f'{parent_dir}/example_data/Z.csv', index_col=0).to_numpy(dtype=float)
 
-factor_matrices, loss_function = SCoNE_parallel(
+factor_matrices, loss_function, benchmark_info = SCoNE_parallel(
     G, 
     C, 
     Z, 
@@ -129,7 +129,9 @@ SCoNE returns two objects:
     - **U_G** (`M_G × M_Z`): covariate effects matrix for genetic decomposition
     - **U_C** (`M_C × M_Z`): covariate effects matrix for clinical decomposition
   
-- **loss_function**: A dictionary containing the total loss and the contribution of each loss component at every optimization iteration. It also records the norms and sparsity of the factor matrices throughout optimization, as well as the final cophenetic correlation coefficient. 
+- **loss_function**: A dictionary containing the total loss and the contribution of each loss component at every optimization iteration. It also records the norms and sparsity of the factor matrices throughout optimization, as well as the final cophenetic correlation coefficient.
+
+- **benchmark_info**: A dictionary containing the total wall-clock time and the peak CPU memory usage when applicable.
 
 
 ## Instructions for use
