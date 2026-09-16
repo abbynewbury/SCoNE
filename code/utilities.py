@@ -7,10 +7,9 @@ from pathlib import Path
 import shutil
 import json
 import pickle
-import algorithms.SCoNE as SCoNE
-import algorithms.MVBCWrapper as MVBCWrapper
-import algorithms.RGWASWrapper as RGWASWrapper
-import time
+import scone_tools.algorithms.SCoNE as SCoNE
+import scone_tools.algorithms.MVBCWrapper as MVBCWrapper
+import scone_tools.algorithms.RGWASWrapper as RGWASWrapper
 
 
 
@@ -52,22 +51,24 @@ def deploy_train_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lamb
                         "max_inner":20, "rho":0.1, "sigma":1e-4, "inner_ftol":1e-4,"max_ls":50,
                         "G_loss_type":G_loss_type, "C_loss_type": C_loss_type,
                         "max_outer":300, "min_outer":10, "tol":1e-4,"post_hoc_rescale":True, "write_all_init":write_all_init, "write_all_init_path":write_all_init_path}
-        factor_matrices, loss_function = SCoNE.SCoNE_parallel(**algorithm_func_kwargs)
+        factor_matrices, loss_function, benchmark_info = SCoNE.SCoNE_parallel(**algorithm_func_kwargs)
 
     elif run_name == 'MVBC':
         algorithm_func_kwargs = {"G_path":G_path,"C_path":C_path, "rank":rank,
                     "lambda_W":reg_params['lambda_W'], "lambda_H_G":reg_params['lambda_H_G'], "lambda_H_C":reg_params['lambda_H_C'], "r_path":r_path}
-        factor_matrices, loss_function = MVBCWrapper.MVBCWrapper(**algorithm_func_kwargs)
+        factor_matrices, loss_function, benchmark_info = MVBCWrapper.MVBCWrapper(**algorithm_func_kwargs)
 
     elif run_name == 'RGWAS':
         algorithm_func_kwargs = {"r_path":r_path, "G_path":G_path,
                         "C_path":C_path, "Z_path":Z_path, "num_init":num_init,"rank":rank,
                         "write_all_init":write_all_init, "write_all_init_path":write_all_init_path}
-        factor_matrices, loss_function = RGWASWrapper.RGWASWrapper(**algorithm_func_kwargs)
+        factor_matrices, loss_function, benchmark_info = RGWASWrapper.RGWASWrapper(**algorithm_func_kwargs)
 
     # write factor matrices and loss function to output path
     with open(f"{out_path}_loss_function.json", "w") as f: 
         json.dump(loss_function, f)
+    with open(f"{out_path}_benchmark_info.json", "w") as f: 
+        json.dump(benchmark_info, f)
     with open(f"{out_path}_factor_matrices.pkl", "wb") as f:
         pickle.dump(factor_matrices, f)
 
@@ -118,13 +119,15 @@ def deploy_test_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambd
                     "max_outer":300, "min_outer":10, "tol":1e-4,"post_hoc_rescale":False,"test":True,
                     "H_G":H_G, "H_C":H_C, "U_G":U_G, "U_C":U_C, "write_all_init":write_all_init, "write_all_init_path":write_all_init_path
                     }
-    factor_matrices, loss_function = SCoNE.SCoNE_parallel(**algorithm_func_kwargs)
+    factor_matrices, loss_function, benchmark_info = SCoNE.SCoNE_parallel(**algorithm_func_kwargs)
 
 
 
     # write factor matrices and loss function to output path
     with open(f"{out_path}_loss_function.json", "w") as f: 
         json.dump(loss_function, f)
+    with open(f"{out_path}_benchmark_info.json", "w") as f: 
+        json.dump(benchmark_info, f)
     with open(f"{out_path}_factor_matrices.pkl", "wb") as f:
         pickle.dump(factor_matrices, f)
 
@@ -133,13 +136,11 @@ def deploy_test_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambd
 def _call_kwargs_deploy_train_run(kw):
     kw = dict(kw)
     job_id = kw.pop("job_id")
-    start = time.perf_counter()
     deploy_train_run(**kw)  
-    return job_id, time.perf_counter() - start
+    return job_id
 
 def _call_kwargs_deploy_test_run(kw):
     kw = dict(kw)
     job_id = kw.pop("job_id")
-    start = time.perf_counter()
     deploy_test_run(**kw)  
-    return job_id, time.perf_counter() - start
+    return job_id

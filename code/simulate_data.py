@@ -18,7 +18,7 @@ def make_correlated_matrices(r, X, y_nonneg=False, seed=0):
         assert np.allclose(X, return_mat)
     return return_mat
 
-def simulate_views(n=1000, M_G=20, M_C=20, 
+def simulate_views(n=1200, M_G=20, M_C=20, 
                    rank=3, seed=0, gamma=5, noise=0,
                    sparsity=0.2, rG=0, rGC=0, rZ=0,
                    signed_cov_effects=False,subgroup_structure=True,
