@@ -9,3 +9,5 @@ tf_env.yml
 *.py[cod]
 *.egg-info/
 
+output/models/*
+output/tmp/*
