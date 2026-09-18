@@ -69,7 +69,6 @@ def simulate_views(n=1200, M_G=20, M_C=20,
         z = make_correlated_matrices(rZ, W[:,1], y_nonneg=True, seed=seed)
     
     else: 
-        assert rZ==0, "set rZ to 0 if no subgroup structure"
         z = proj_nonneg(rng.normal(size=n))
     
     # 5. Generate covariate matrix
