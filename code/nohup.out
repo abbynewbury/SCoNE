@@ -6,3 +6,134 @@ done with tuning
 done with training
 (172, 19)
 (172, 24)
+Traceback (most recent call last):
+  File "/home/jupyter/repos/SCoNE/code/test_reconstruction.py", line 320, in <module>
+    run_one({"rG":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]}, output_dir=output_dir, experiment_name="rG")
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jupyter/repos/SCoNE/code/test_reconstruction.py", line 233, in run_one
+    G = pd.read_csv(G_path, index_col=0).to_numpy(dtype=np.float64)
+        ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/envs/py311/lib/python3.14/site-packages/pandas/io/parsers/readers.py", line 873, in read_csv
+    return _read(filepath_or_buffer, kwds)
+  File "/opt/conda/envs/py311/lib/python3.14/site-packages/pandas/io/parsers/readers.py", line 300, in _read
+    parser = TextFileReader(filepath_or_buffer, **kwds)
+  File "/opt/conda/envs/py311/lib/python3.14/site-packages/pandas/io/parsers/readers.py", line 1645, in __init__
+    self._engine = self._make_engine(f, self.engine)
+                   ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "/opt/conda/envs/py311/lib/python3.14/site-packages/pandas/io/parsers/readers.py", line 1904, in _make_engine
+    self.handles = get_handle(
+                   ~~~~~~~~~~^
+        f,
+        ^^
+    ...<6 lines>...
+        storage_options=self.options.get("storage_options", None),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/conda/envs/py311/lib/python3.14/site-packages/pandas/io/common.py", line 930, in get_handle
+    handle = open(
+        handle,
+    ...<3 lines>...
+        newline="",
+    )
+FileNotFoundError: [Errno 2] No such file or directory: '/home/jupyter/repos/SCoNE/output/tmp/rG/G_tune_0.csv'
+Traceback (most recent call last):
+  File "/home/jupyter/repos/SCoNE/code/test_reconstruction.py", line 321, in <module>
+    run_one({"rG":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]}, output_dir=output_dir, experiment_name="rG")
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jupyter/repos/SCoNE/code/test_reconstruction.py", line 234, in run_one
+    G = pd.read_csv(G_path, index_col=0).to_numpy(dtype=np.float64)
+        ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/envs/py311/lib/python3.14/site-packages/pandas/io/parsers/readers.py", line 873, in read_csv
+    return _read(filepath_or_buffer, kwds)
+  File "/opt/conda/envs/py311/lib/python3.14/site-packages/pandas/io/parsers/readers.py", line 300, in _read
+    parser = TextFileReader(filepath_or_buffer, **kwds)
+  File "/opt/conda/envs/py311/lib/python3.14/site-packages/pandas/io/parsers/readers.py", line 1645, in __init__
+    self._engine = self._make_engine(f, self.engine)
+                   ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "/opt/conda/envs/py311/lib/python3.14/site-packages/pandas/io/parsers/readers.py", line 1904, in _make_engine
+    self.handles = get_handle(
+                   ~~~~~~~~~~^
+        f,
+        ^^
+    ...<6 lines>...
+        storage_options=self.options.get("storage_options", None),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/conda/envs/py311/lib/python3.14/site-packages/pandas/io/common.py", line 930, in get_handle
+    handle = open(
+        handle,
+    ...<3 lines>...
+        newline="",
+    )
+FileNotFoundError: [Errno 2] No such file or directory: '/home/jupyter/repos/SCoNE/output/tmp/rG/G_tune_0.csv'
+    rG  sim_id
+0  0.1       0
+1  0.2       1
+2  0.3       2
+3  0.4       3
+4  0.5       4
+5  0.6       5
+6  0.7       6
+7  0.8       7
+8  0.9       8
+9  1.0       9
+plan dtypes: sim_id             int64
+run_name             str
+split                str
+lambda_option    float64
+rG               float64
+job_id             int64
+out_path             str
+dtype: object
+Traceback (most recent call last):
+  File "/home/jupyter/repos/SCoNE/code/test_reconstruction.py", line 323, in <module>
+    run_one({"rG":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]}, output_dir=output_dir, experiment_name="rG")
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jupyter/repos/SCoNE/code/test_reconstruction.py", line 236, in run_one
+    G = pd.read_csv(G_path, index_col=0).to_numpy(dtype=np.float64)
+        ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/envs/py311/lib/python3.14/site-packages/pandas/io/parsers/readers.py", line 873, in read_csv
+    return _read(filepath_or_buffer, kwds)
+  File "/opt/conda/envs/py311/lib/python3.14/site-packages/pandas/io/parsers/readers.py", line 300, in _read
+    parser = TextFileReader(filepath_or_buffer, **kwds)
+  File "/opt/conda/envs/py311/lib/python3.14/site-packages/pandas/io/parsers/readers.py", line 1645, in __init__
+    self._engine = self._make_engine(f, self.engine)
+                   ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "/opt/conda/envs/py311/lib/python3.14/site-packages/pandas/io/parsers/readers.py", line 1904, in _make_engine
+    self.handles = get_handle(
+                   ~~~~~~~~~~^
+        f,
+        ^^
+    ...<6 lines>...
+        storage_options=self.options.get("storage_options", None),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/conda/envs/py311/lib/python3.14/site-packages/pandas/io/common.py", line 930, in get_handle
+    handle = open(
+        handle,
+    ...<3 lines>...
+        newline="",
+    )
+FileNotFoundError: [Errno 2] No such file or directory: '/home/jupyter/repos/SCoNE/output/tmp/rG/G_tune_0.csv'
+    rG  sim_id
+0  0.1       0
+1  0.2       1
+2  0.3       2
+3  0.4       3
+4  0.5       4
+5  0.6       5
+6  0.7       6
+7  0.8       7
+8  0.9       8
+9  1.0       9
+plan dtypes: sim_id             int64
+run_name             str
+split                str
+lambda_option    float64
+rG               float64
+job_id             int64
+out_path             str
+dtype: object

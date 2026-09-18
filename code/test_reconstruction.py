@@ -153,6 +153,8 @@ def run_one(variable_ranges, output_dir, experiment_name):
         columns=param_names,
     )
     conditions["sim_id"] = range(len(conditions))
+    conditions["sim_id"] = conditions["sim_id"].astype(int)
+    print(conditions, flush=True)
     
     all_results = []
     DEFAULT_SIM_KWARGS = {"n":1200,"M_C":20,"M_G":20,"rank":3,"noise":0.5,"gamma": 5,"sparsity":0.2,"rG":0.5,
@@ -168,7 +170,7 @@ def run_one(variable_ranges, output_dir, experiment_name):
             sim_kwargs["seed"] = seed
             sim = simulate_views(**sim_kwargs)
 
-            sim_id = condition["sim_id"]
+            sim_id = int(condition["sim_id"])
 
             if 'unobs_conf' in param_names:
                 # record
@@ -221,6 +223,7 @@ def run_one(variable_ranges, output_dir, experiment_name):
     plan = plan.reset_index(drop=True)  
     plan["job_id"] = plan.groupby(['sim_id','run_name','lambda_option']).ngroup()
     plan["out_path"] = exp_models_folder + "/"+ plan["split"] + "_" + plan["job_id"].astype(str)
+    print(f'plan dtypes: {plan.dtypes}',flush=True)
     plan.to_csv(f"{exp_models_folder}/run_plan.csv", index=False)
     
     
