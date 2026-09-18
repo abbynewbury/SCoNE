@@ -157,8 +157,11 @@ def run_one(variable_ranges, output_dir, experiment_name):
     print(conditions, flush=True)
     
     all_results = []
-    DEFAULT_SIM_KWARGS = {"n":1200,"M_C":20,"M_G":20,"rank":3,"noise":0.5,"gamma": 5,"sparsity":0.2,"rG":0.5,
-                      "rGC":0.2,"rZ":0.2,"signed_cov_effects": False,"subgroup_structure": True, "overdispersion_nu":0} 
+    # TODO: put back once testing done
+    # DEFAULT_SIM_KWARGS = {"n":1200,"M_C":20,"M_G":20,"rank":3,"noise":0.5,"gamma": 5,"sparsity":0.2,"rG":0.5,
+    #                   "rGC":0.2,"rZ":0.2,"signed_cov_effects": False,"subgroup_structure": True, "overdispersion_nu":0} 
+    DEFAULT_SIM_KWARGS = {"n":1200,"M_C":20,"M_G":20,"rank":3,"noise":0.5,"gamma": 1, "sparsity":0,"rG":0,
+                      "rGC":0,"rZ":0,"signed_cov_effects": False,"subgroup_structure": True, "overdispersion_nu":0} 
     
     # ---- simulate data ---- (goes in tmp folder)
     for _, condition in conditions.iterrows():

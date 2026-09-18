@@ -16,7 +16,7 @@ def MVBCWrapper(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, r_path):
     r_output = result.stdout.strip()
     warn_output = result.stderr.strip()
     if "mvbc does not converge" in r_output:
-        return False, "mvbc does not converge"
+        return False, "mvbc does not converge", None
     json_str = r_output[r_output.index("{"):]
     parsed = json.loads(json_str)
     factor_matrices = {k: np.array(v) for k,v in parsed["factor_matrices"].items()}
