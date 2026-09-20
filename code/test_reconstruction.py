@@ -13,7 +13,8 @@ from itertools import product
 # make tmp dir
 root_dir = '/home/jupyter/repos/SCoNE'
 code_dir = f'{root_dir}/code'
-tmp_folder = f"{root_dir}/output/tmp"
+workspace_dir='/home/jupyter/workspace/disease_subtyping'
+tmp_folder = f"{workspace_dir}/simulations_output/tmp"
 os.makedirs(tmp_folder, exist_ok=True)
 sys.path.append(code_dir)
 import scone_tools.evaluation.reconstruction_evaluation as reconstruction_evaluation
@@ -154,12 +155,9 @@ def run_one(variable_ranges, output_dir, experiment_name):
     )
     conditions["sim_id"] = range(len(conditions))
     conditions["sim_id"] = conditions["sim_id"].astype(int)
-    print(conditions, flush=True)
     
     all_results = []
-    # TODO: put back once testing done
-    # DEFAULT_SIM_KWARGS = {"n":1200,"M_C":20,"M_G":20,"rank":3,"noise":0.5,"gamma": 5,"sparsity":0.2,"rG":0.5,
-    #                   "rGC":0.2,"rZ":0.2,"signed_cov_effects": False,"subgroup_structure": True, "overdispersion_nu":0} 
+
     DEFAULT_SIM_KWARGS = {"n":1200,"M_C":20,"M_G":20,"rank":3,"noise":0.5,"gamma": 1, "sparsity":0,"rG":0,
                       "rGC":0,"rZ":0,"signed_cov_effects": False,"subgroup_structure": True, "overdispersion_nu":0} 
     
@@ -174,12 +172,13 @@ def run_one(variable_ranges, output_dir, experiment_name):
             sim = simulate_views(**sim_kwargs)
 
             sim_id = int(condition["sim_id"])
-
+            
             if 'unobs_conf' in param_names:
-                # record
-                pd.DataFrame(sim["Z"]).to_csv(f'{exp_tmp_folder}/Z_{split}_{sim_id}_w_conf.csv')
-                # remove covariate
-                sim["Z"] = sim['Z'][:, np.all(sim['Z'] == 1, axis=0)]
+                if condition.unobs_conf:
+                    # record
+                    pd.DataFrame(sim["Z"]).to_csv(f'{exp_tmp_folder}/Z_{split}_{sim_id}_w_conf.csv')
+                    # remove covariate
+                    sim["Z"] = sim['Z'][:, np.all(sim['Z'] == 1, axis=0)]
 
             with open(f'{exp_tmp_folder}/sim_{split}_{sim_id}.pkl','wb') as f:
                 pickle.dump(sim,f)
@@ -226,7 +225,6 @@ def run_one(variable_ranges, output_dir, experiment_name):
     plan = plan.reset_index(drop=True)  
     plan["job_id"] = plan.groupby(['sim_id','run_name','lambda_option']).ngroup()
     plan["out_path"] = exp_models_folder + "/"+ plan["split"] + "_" + plan["job_id"].astype(str)
-    print(f'plan dtypes: {plan.dtypes}',flush=True)
     plan.to_csv(f"{exp_models_folder}/run_plan.csv", index=False)
     
     
@@ -258,7 +256,7 @@ def run_one(variable_ranges, output_dir, experiment_name):
     
     # ---- run TUNE ----
 
-    with ProcessPoolExecutor(max_workers=16) as ex:
+    with ProcessPoolExecutor(max_workers=32) as ex:
         futures = [
             ex.submit(_one_run, tune_arg, exp_tmp_folder, 'tune')
             for tune_arg in tuning_args
@@ -269,7 +267,7 @@ def run_one(variable_ranges, output_dir, experiment_name):
             all_results.append(results)
 
     tune_record.to_csv(f"{exp_models_folder}/run_record_tune.csv", index=False)
-    print("done with tuning", flush=True)
+    print(f"done with tuning {experiment_name}", flush=True)
     tune_results = pd.concat(all_results).merge(tune_record,on=['sim_id','job_id'],how='left')
     optimal_job_ids = tune_results.loc[tune_results.groupby(['sim_id','run_name'])['tuning_metric'].idxmin()]['job_id']
 
@@ -299,7 +297,7 @@ def run_one(variable_ranges, output_dir, experiment_name):
                                     lambda_Gloss=1))
     train_record = pd.DataFrame(training_rows)
     # ---- run TRAIN ----
-    with ProcessPoolExecutor(max_workers=16) as ex:
+    with ProcessPoolExecutor(max_workers=32) as ex:
         futures = [
             ex.submit(_one_run, train_arg, exp_tmp_folder, 'train')
             for train_arg in training_args
@@ -310,7 +308,7 @@ def run_one(variable_ranges, output_dir, experiment_name):
             all_results.append(results)
     
     train_record.to_csv(f"{exp_models_folder}/run_record_train.csv", index=False)
-    print("done with training", flush=True)
+    print(f"done with training {experiment_name}", flush=True)
 
     all_results = pd.concat(all_results)
     all_results = all_results.merge(plan, how='left', on=['split','sim_id','job_id'])
@@ -320,16 +318,16 @@ def run_one(variable_ranges, output_dir, experiment_name):
 
 if __name__ == "__main__": 
     run_evaluation_only=False
-    output_dir = f'{root_dir}/output'
+    output_dir = f'{workspace_dir}/simulations_output'
+
+    # ASSESS RUNS OVER rZ
+    run_one({"rZ":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0], "unobs_conf":[True,False]}, output_dir=output_dir, experiment_name="rZ_unobs")
 
     # ASSESS RUNS OVER rG 
     run_one({"rG":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]}, output_dir=output_dir, experiment_name="rG")
 
     # ASSESS RUNS OVER rGC
-    run_one({"rGC":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]}, output_dir=output_dir, experiment_name="rGC")
-
-    # ASSESS RUNS OVER rZ
-    run_one({"rZ":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0], "unobs_conf":[True,False]}, output_dir=output_dir, experiment_name="rZ_unobs") 
+    run_one({"rGC":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]}, output_dir=output_dir, experiment_name="rGC") 
 
     # ASSESS RUNS OVER SIGNED EFFECTS
     run_one({"signed_cov_effects":[True, False]}, output_dir=output_dir, experiment_name="signed_cov_effects")
