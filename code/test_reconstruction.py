@@ -164,8 +164,10 @@ def run_one(variable_ranges, output_dir, experiment_name):
     # ---- simulate data ---- (goes in tmp folder)
     for _, condition in conditions.iterrows():
 
+        # intentional: w/ or w/out unobs_conf won't change sim even though given different id
+        # rank should always be 3 in simulation and then be altered in decomposition kwargs
         sim_kwargs = DEFAULT_SIM_KWARGS | {
-        k: condition[k] for k in param_names if k!='unobs_conf'} # intentional: w/ or w/out unobs_conf won't change sim even though given different id
+        k: condition[k] for k in param_names if k not in ['unobs_conf','rank']} 
 
         for split, seed in [("tune", 0), ("train", 1)]:
             sim_kwargs["seed"] = seed
@@ -241,16 +243,17 @@ def run_one(variable_ranges, output_dir, experiment_name):
         if row.lambda_option != 0: alpha = max(G.max(), C.max())**2
         else: alpha=0
         reg = {'lambda_W':row.lambda_option,'alpha':alpha,'lambda_H_G':row.lambda_option,'lambda_H_C':row.lambda_option}
-        
+        if 'rank' in row.index: rank=row.rank
+        else: rank=3
         a = dict(job_id=row.job_id,run_name=row.run_name, out_path=row.out_path, G=G, C=C, Z=Z, reg_params=reg,sim_id=row.sim_id,
             lambda_Gloss=1, 
-            G_path=G_path, C_path=C_path, Z_path=Z_path, r_path='/opt/conda/envs/jupyter/bin/Rscript', rank=3, num_init=50,
+            G_path=G_path, C_path=C_path, Z_path=Z_path, r_path='/opt/conda/envs/jupyter/bin/Rscript', rank=rank, num_init=50,
             write_all_init=True, write_all_init_path=row.out_path) 
         tuning_args.append(a)
         tuning_rows.append(dict(out_path=row.out_path,sim_id=row.sim_id,
                                 run_name=row.run_name,job_id=row.job_id,
                                 lambda_option=row.lambda_option, alpha=reg['alpha'], lambda_W=reg['lambda_W'],
-                                lambda_H_G=reg['lambda_H_G'],lambda_H_C=reg['lambda_H_C'], rank=3, num_init=50, 
+                                lambda_H_G=reg['lambda_H_G'],lambda_H_C=reg['lambda_H_C'], rank=rank, num_init=50, 
                                     lambda_Gloss=1))
     tune_record = pd.DataFrame(tuning_rows)
     
@@ -283,17 +286,19 @@ def run_one(variable_ranges, output_dir, experiment_name):
 
         if row.lambda_option != 0: alpha = max(G.max(), C.max())**2
         else: alpha=0
+        if 'rank' in row.index: rank=row.rank
+        else: rank=3
         reg = {'lambda_W':row.lambda_option,'alpha':alpha,'lambda_H_G':row.lambda_option,'lambda_H_C':row.lambda_option}
         
         a = dict(job_id=row.job_id,run_name=row.run_name, out_path=row.out_path, G=G, C=C, Z=Z, reg_params=reg,sim_id=row.sim_id,
             lambda_Gloss=1,
-            G_path=G_path, C_path=C_path, Z_path=Z_path, r_path='/opt/conda/envs/jupyter/bin/Rscript', rank=3, num_init=50, 
+            G_path=G_path, C_path=C_path, Z_path=Z_path, r_path='/opt/conda/envs/jupyter/bin/Rscript', rank=rank, num_init=50, 
             write_all_init=True, write_all_init_path=row.out_path) 
         training_args.append(a)
         training_rows.append(dict(out_path=row.out_path,sim_id=row.sim_id,
                                 run_name=row.run_name,job_id=row.job_id,
                                 lambda_option=row.lambda_option, alpha=reg['alpha'], lambda_W=reg['lambda_W'],
-                                lambda_H_G=reg['lambda_H_G'],lambda_H_C=reg['lambda_H_C'], rank=3, num_init=50,
+                                lambda_H_G=reg['lambda_H_G'],lambda_H_C=reg['lambda_H_C'], rank=rank, num_init=50,
                                     lambda_Gloss=1))
     train_record = pd.DataFrame(training_rows)
     # ---- run TRAIN ----
@@ -320,31 +325,31 @@ if __name__ == "__main__":
     run_evaluation_only=False
     output_dir = f'{workspace_dir}/simulations_output'
 
-    # ASSESS RUNS OVER rZ
-    run_one({"rZ":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0], "unobs_conf":[True,False]}, output_dir=output_dir, experiment_name="rZ_unobs")
+    # # ASSESS RUNS OVER rZ
+    # run_one({"rZ":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0], "unobs_conf":[True,False]}, output_dir=output_dir, experiment_name="rZ_unobs")
 
-    # ASSESS RUNS OVER rG 
-    run_one({"rG":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]}, output_dir=output_dir, experiment_name="rG")
+    # # ASSESS RUNS OVER rG 
+    # run_one({"rG":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]}, output_dir=output_dir, experiment_name="rG")
 
-    # ASSESS RUNS OVER rGC
-    run_one({"rGC":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]}, output_dir=output_dir, experiment_name="rGC") 
+    # # ASSESS RUNS OVER rGC
+    # run_one({"rGC":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]}, output_dir=output_dir, experiment_name="rGC") 
 
-    # ASSESS RUNS OVER SIGNED EFFECTS
-    run_one({"signed_cov_effects":[True, False]}, output_dir=output_dir, experiment_name="signed_cov_effects")
+    # # ASSESS RUNS OVER SIGNED EFFECTS
+    # run_one({"signed_cov_effects":[True, False]}, output_dir=output_dir, experiment_name="signed_cov_effects")
 
-    # ASSESS RUNS OVER OVERDISPERSION
-    run_one({"overdispersion_nu":[0, 0.1, 0.5, 1.0]}, output_dir=output_dir, experiment_name="overdispersion_nu")
+    # # ASSESS RUNS OVER OVERDISPERSION
+    # run_one({"overdispersion_nu":[0, 0.1, 0.5, 1.0]}, output_dir=output_dir, experiment_name="overdispersion_nu")
 
-    # ASSESS RUNS OVER RANK MISSPECIFICATION
+    # ASSESS RUNS OVER RANK MISSPECIFICATION - TODO: undo all other comments
     run_one({"rank":[2, 3, 4, 5], "subgroup_structure":[True, False]}, output_dir=output_dir, experiment_name="rank_subgroupstructure") 
     
-    # Supplementary
+    # # Supplementary
 
-    # ASSESS RUNS OVER SPARSITY
-    run_one({"sparsity": [0.0,0.25,0.5,0.75,0.9]}, output_dir=output_dir, experiment_name="sparsity")
+    # # ASSESS RUNS OVER SPARSITY
+    # run_one({"sparsity": [0.0,0.25,0.5,0.75,0.9]}, output_dir=output_dir, experiment_name="sparsity")
 
-    # ASSESS RUNS OVER GAMMA
-    run_one({"gamma": [1,5,10]}, output_dir=output_dir,  experiment_name="gamma")
+    # # ASSESS RUNS OVER GAMMA
+    # run_one({"gamma": [1,5,10]}, output_dir=output_dir,  experiment_name="gamma")
         
 
     
