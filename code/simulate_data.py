@@ -110,3 +110,31 @@ def simulate_views(n=1200, M_G=20, M_C=20,
     else:
         return_dict = {"G": G, "C": C, "Z":Z, "U_G": U_G, "U_C": U_C}
     return return_dict
+
+
+def simulate_views_hnmf(n=20, M_G=100, M_C=10, rank=3, seed=0):
+    """
+    simulations as described in Luo et al. to the extend they are described
+    n: number of participants
+    M_G: number of genetic features
+    M_C: number of clinical features
+    rank: number of subgroups
+    seed: random seed
+    """
+
+    rng = np.random.default_rng(seed)
+
+    # 1. Simulate W, H_G, H_C
+    W = proj_nonneg(rng.normal(size=(n, rank)))
+    H_G = proj_nonneg(rng.normal(size=(M_G, rank)))
+    H_C = proj_nonneg(rng.normal(size=(M_C, rank)))
+    
+    # 2. Generate C
+    C = W@H_C.T + proj_nonneg(rng.normal(size=(n, M_C)))
+    
+    # 3. Generate matrix means and G
+    mu_G = W@H_G.T 
+    G = rng.poisson(mu_G).astype(float)  
+
+    return_dict = {"G": G, "C": C, "W":W, "H_G": H_G, "H_C": H_C}
+    return return_dict

@@ -475,6 +475,11 @@ def alternating_opt(
             for key, value in factor_matrices.items()
         }
 
+        loss_dict = {
+            key: [float(x) for x in value] if isinstance(value, list) else value
+            for key, value in loss_dict.items()
+        }
+
     return factor_matrices, loss_dict
 
 def SCoNE_parallel(
