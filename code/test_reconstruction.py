@@ -257,7 +257,7 @@ def run_one(variable_ranges, output_dir, experiment_name):
     
     # ---- run TUNE ----
 
-    with ProcessPoolExecutor(max_workers=32) as ex:
+    with ProcessPoolExecutor(max_workers=16) as ex:
         futures = [
             ex.submit(_one_run, tune_arg, exp_tmp_folder, 'tune')
             for tune_arg in tuning_args
@@ -298,7 +298,7 @@ def run_one(variable_ranges, output_dir, experiment_name):
                                     lambda_Gloss=1))
     train_record = pd.DataFrame(training_rows)
     # ---- run TRAIN ----
-    with ProcessPoolExecutor(max_workers=32) as ex:
+    with ProcessPoolExecutor(max_workers=16) as ex:
         futures = [
             ex.submit(_one_run, train_arg, exp_tmp_folder, 'train')
             for train_arg in training_args
@@ -321,8 +321,8 @@ if __name__ == "__main__":
     run_evaluation_only=False
     output_dir = f'{workspace_dir}/simulations_output'
 
-    # ASSESS RUNS OVER rZ
-    run_one({"rZ":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0], "unobs_conf":[True,False]}, output_dir=output_dir, experiment_name="rZ_unobs")
+    # ASSESS RUNS OVER rZ, unobs conf. and gamma
+    run_one({"rZ":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0], "unobs_conf":[True,False],"gamma": [1,5,10]}, output_dir=output_dir, experiment_name="rZ_unobs_gamma")
 
     # ASSESS RUNS OVER rG 
     run_one({"rG":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]}, output_dir=output_dir, experiment_name="rG")
@@ -339,13 +339,10 @@ if __name__ == "__main__":
     # ASSESS RUNS OVER RANK MISSPECIFICATION 
     run_one({"rank":[2, 3, 4, 5], "subgroup_structure":[True, False]}, output_dir=output_dir, experiment_name="rank_subgroupstructure") 
     
-    # Supplementary
-
     # ASSESS RUNS OVER SPARSITY
     run_one({"sparsity": [0.0,0.25,0.5,0.75,0.9]}, output_dir=output_dir, experiment_name="sparsity")
 
-    # ASSESS RUNS OVER GAMMA
-    run_one({"gamma": [1,5,10]}, output_dir=output_dir,  experiment_name="gamma")
+
         
 
     
