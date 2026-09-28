@@ -28,11 +28,15 @@ def run_scaling(variable_ranges):
 
         print(sim_kwargs, flush=True)
         print('running on CPU', flush=True) 
+        if 'rank' in params:
+            rank = new_value_dict['rank']
+        else:
+            rank=3
         factor_matrices, loss_function, benchmark_info = SCoNE_parallel(
             sim["G"].astype(float), 
             sim["C"].astype(float), 
             sim["Z"].astype(float), 
-            rank=3,
+            rank=rank,
             alpha=0,
             lambda_H_G=0, 
             lambda_H_C=0, 
@@ -71,12 +75,12 @@ def run_scaling(variable_ranges):
         benchmark_infos.append(benchmark_info_gpu)
     return pd.DataFrame(benchmark_infos)
 
-benchmark_infos = run_scaling({'M_G':[100,250,500,1000], 
-                               'M_C':[100,250,500,1000]})
-benchmark_infos.to_csv(f'{output_dir}/benchmarking_features.csv') 
+# benchmark_infos = run_scaling({'M_G':[100,250,500,1000], 
+#                                'M_C':[100,250,500,1000]})
+# benchmark_infos.to_csv(f'{output_dir}/benchmarking_features.csv') 
 
-benchmark_infos_n = run_scaling({'n':[1000,5000,10000,20000,50000]})
-benchmark_infos_n.to_csv(f'{output_dir}/benchmarking_n.csv')
+# benchmark_infos_n = run_scaling({'n':[1000,5000,10000,20000,50000]})
+# benchmark_infos_n.to_csv(f'{output_dir}/benchmarking_n.csv')
 
 benchmark_infos_n = run_scaling({'rank':[2,3,4,5,10]})
 benchmark_infos_n.to_csv(f'{output_dir}/benchmarking_rank.csv')
