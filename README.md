@@ -165,7 +165,7 @@ The following files are included to support transparency and reproducibility but
 
 ### Simulated Data
 
-The script `code/test_reconstruction.py` contains the code used to simulate datasets and evaluate SCoNE and the comparator methods described in the manuscript. The notebook `code/test_reconstruction.ipynb` contains the code used to visualize and analyze these results. It also contains additional benchmarking analysis and validation of HNMF re-implementation.
+The script `code/test_reconstruction.py` contains the code used to simulate datasets and evaluate SCoNE and the comparator methods described in the manuscript. The notebook `code/test_reconstruction.ipynb` contains the code used to visualize and analyze these results. It also contains additional benchmarking analysis and validation of HNMF re-implementation. The script `code/run_benchmarking.py` contains code to benchmark SCoNE on GPU and CPU across the number of participants, clinical and genetic features, and rank using simulated data.
 
 ### Algorithm Evaluation
 
