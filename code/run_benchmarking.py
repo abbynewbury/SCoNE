@@ -73,7 +73,7 @@ def run_scaling(variable_ranges):
 
 benchmark_infos = run_scaling({'M_G':[100,250,500,1000], 
                                'M_C':[100,250,500,1000]})
-benchmark_infos.to_csv(f'{output_dir}/benchmarking_features_gpu.csv')
+benchmark_infos.to_csv(f'{output_dir}/benchmarking_features_gpu.csv') # TODO: remove _ gpu
 
 benchmark_infos_n = run_scaling({'n':[1000,5000,10000,20000,50000]})
 benchmark_infos_n.to_csv(f'{output_dir}/benchmarking_n_gpu.csv')
