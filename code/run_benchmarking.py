@@ -27,25 +27,25 @@ def run_scaling(variable_ranges):
         sim = simulate_views(**sim_kwargs)
 
         print(sim_kwargs, flush=True)
-        # print('running on CPU', flush=True) # TODO: uncomment
-        # factor_matrices, loss_function, benchmark_info = SCoNE_parallel(
-        #     sim["G"].astype(float), 
-        #     sim["C"].astype(float), 
-        #     sim["Z"].astype(float), 
-        #     rank=3,
-        #     alpha=0,
-        #     lambda_H_G=0, 
-        #     lambda_H_C=0, 
-        #     lambda_Gloss=1,  
-        #     num_init=10,
-        #     init='random',
-        #     G_loss_type='kl_div', 
-        #     C_loss_type='kl_div', 
-        # )
-        # benchmark_info['processor'] = 'cpu'
-        # for k,v in new_value_dict.items():
-        #     benchmark_info[k] = v
-        # benchmark_infos.append(benchmark_info)
+        print('running on CPU', flush=True) 
+        factor_matrices, loss_function, benchmark_info = SCoNE_parallel(
+            sim["G"].astype(float), 
+            sim["C"].astype(float), 
+            sim["Z"].astype(float), 
+            rank=3,
+            alpha=0,
+            lambda_H_G=0, 
+            lambda_H_C=0, 
+            lambda_Gloss=1,  
+            num_init=10,
+            init='random',
+            G_loss_type='kl_div', 
+            C_loss_type='kl_div', 
+        )
+        benchmark_info['processor'] = 'cpu'
+        for k,v in new_value_dict.items():
+            benchmark_info[k] = v
+        benchmark_infos.append(benchmark_info)
     
         print('running on GPU', flush=True)
         factor_matrices_gpu, loss_function_gpu, benchmark_info_gpu = SCoNE_parallel(
@@ -73,10 +73,10 @@ def run_scaling(variable_ranges):
 
 benchmark_infos = run_scaling({'M_G':[100,250,500,1000], 
                                'M_C':[100,250,500,1000]})
-benchmark_infos.to_csv(f'{output_dir}/benchmarking_features_gpu.csv') # TODO: remove _ gpu
+benchmark_infos.to_csv(f'{output_dir}/benchmarking_features.csv') 
 
 benchmark_infos_n = run_scaling({'n':[1000,5000,10000,20000,50000]})
-benchmark_infos_n.to_csv(f'{output_dir}/benchmarking_n_gpu.csv')
+benchmark_infos_n.to_csv(f'{output_dir}/benchmarking_n.csv')
 
 benchmark_infos_n = run_scaling({'rank':[2,3,4,5,10]})
-benchmark_infos_n.to_csv(f'{output_dir}/benchmarking_rank_gpu.csv')
+benchmark_infos_n.to_csv(f'{output_dir}/benchmarking_rank.csv')
