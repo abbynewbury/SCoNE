@@ -56,7 +56,7 @@ def run_scaling(variable_ranges):
             sim["G"].astype(float), 
             sim["C"].astype(float), 
             sim["Z"].astype(float), 
-            rank=3,
+            rank=rank,
             alpha=0,
             lambda_H_G=0, 
             lambda_H_C=0, 

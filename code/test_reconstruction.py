@@ -244,7 +244,7 @@ def run_one(variable_ranges, output_dir, experiment_name):
         reg = {'lambda_W':row.lambda_option,'alpha':alpha,'lambda_H_G':row.lambda_option,'lambda_H_C':row.lambda_option}
         rank = row['rank'] if 'rank' in row.index else 3
         a = dict(job_id=row.job_id,run_name=row.run_name, out_path=row.out_path, G=G, C=C, Z=Z, reg_params=reg,sim_id=row.sim_id,
-            lambda_Gloss=1, 
+            lambda_Gloss=C.sum()/G.sum(), 
             G_path=G_path, C_path=C_path, Z_path=Z_path, r_path='/opt/conda/envs/jupyter/bin/Rscript', rank=rank, num_init=50,
             write_all_init=True, write_all_init_path=row.out_path) 
         tuning_args.append(a)
@@ -252,7 +252,7 @@ def run_one(variable_ranges, output_dir, experiment_name):
                                 run_name=row.run_name,job_id=row.job_id,
                                 lambda_option=row.lambda_option, alpha=reg['alpha'], lambda_W=reg['lambda_W'],
                                 lambda_H_G=reg['lambda_H_G'],lambda_H_C=reg['lambda_H_C'], rank=rank, num_init=50, 
-                                    lambda_Gloss=1))
+                                    lambda_Gloss=C.sum()/G.sum()))
     tune_record = pd.DataFrame(tuning_rows)
     
     # ---- run TUNE ----
@@ -287,7 +287,7 @@ def run_one(variable_ranges, output_dir, experiment_name):
         reg = {'lambda_W':row.lambda_option,'alpha':alpha,'lambda_H_G':row.lambda_option,'lambda_H_C':row.lambda_option}
         rank = row['rank'] if 'rank' in row.index else 3
         a = dict(job_id=row.job_id,run_name=row.run_name, out_path=row.out_path, G=G, C=C, Z=Z, reg_params=reg,sim_id=row.sim_id,
-            lambda_Gloss=1,
+            lambda_Gloss=C.sum()/G.sum(),
             G_path=G_path, C_path=C_path, Z_path=Z_path, r_path='/opt/conda/envs/jupyter/bin/Rscript', rank=rank, num_init=50, 
             write_all_init=True, write_all_init_path=row.out_path) 
         training_args.append(a)
@@ -295,7 +295,7 @@ def run_one(variable_ranges, output_dir, experiment_name):
                                 run_name=row.run_name,job_id=row.job_id,
                                 lambda_option=row.lambda_option, alpha=reg['alpha'], lambda_W=reg['lambda_W'],
                                 lambda_H_G=reg['lambda_H_G'],lambda_H_C=reg['lambda_H_C'], rank=rank, num_init=50,
-                                    lambda_Gloss=1))
+                                    lambda_Gloss=C.sum()/G.sum()))
     train_record = pd.DataFrame(training_rows)
     # ---- run TRAIN ----
     with ProcessPoolExecutor(max_workers=16) as ex:
@@ -322,9 +322,9 @@ if __name__ == "__main__":
     output_dir = f'{workspace_dir}/simulations_output'
 
     # ASSESS RUNS OVER rZ, unobs conf. and gamma
-    run_one({"rZ":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0], "unobs_conf":[True,False],"gamma": [1,5,10]}, output_dir=output_dir, experiment_name="rZ_unobs_gamma")
+    run_one({"rZ":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0], "unobs_conf":[True,False],"gamma": [1,5]}, output_dir=output_dir, experiment_name="rZ_unobs_gamma")
 
-    # ASSESS RUNS OVER rG 
+    # ASSESS RUNS OVER rG
     run_one({"rG":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]}, output_dir=output_dir, experiment_name="rG")
 
     # ASSESS RUNS OVER rGC
