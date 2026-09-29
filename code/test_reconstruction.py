@@ -257,7 +257,7 @@ def run_one(variable_ranges, output_dir, experiment_name):
     
     # ---- run TUNE ----
 
-    with ProcessPoolExecutor(max_workers=16) as ex:
+    with ProcessPoolExecutor(max_workers=32) as ex:
         futures = [
             ex.submit(_one_run, tune_arg, exp_tmp_folder, 'tune')
             for tune_arg in tuning_args
@@ -298,7 +298,7 @@ def run_one(variable_ranges, output_dir, experiment_name):
                                     lambda_Gloss=np.linalg.norm(C)**2/np.linalg.norm(G)**2 if row.run_name=='HNMF(res)' else C.sum()/G.sum()))
     train_record = pd.DataFrame(training_rows)
     # ---- run TRAIN ----
-    with ProcessPoolExecutor(max_workers=16) as ex:
+    with ProcessPoolExecutor(max_workers=32) as ex:
         futures = [
             ex.submit(_one_run, train_arg, exp_tmp_folder, 'train')
             for train_arg in training_args
