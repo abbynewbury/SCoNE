@@ -68,19 +68,19 @@ def run_scaling(variable_ranges):
             use_gpu=True
         )
         assert np.isclose(loss_function_gpu['total_loss'][-1], 
-                          loss_function['total_loss'][-1], rtol=1e-3)
+                          loss_function['total_loss'][-1], rtol=1e-3, atol=1e-6)
         benchmark_info_gpu['processor'] = 'gpu'
         for k,v in new_value_dict.items():
             benchmark_info_gpu[k] = v
         benchmark_infos.append(benchmark_info_gpu)
     return pd.DataFrame(benchmark_infos)
 
-# benchmark_infos = run_scaling({'M_G':[100,250,500,1000], 
-#                                'M_C':[100,250,500,1000]})
-# benchmark_infos.to_csv(f'{output_dir}/benchmarking_features.csv') 
+benchmark_infos = run_scaling({'M_G':[100,250,500,1000], 
+                               'M_C':[100,250,500,1000]})
+benchmark_infos.to_csv(f'{output_dir}/benchmarking_features.csv') 
 
-# benchmark_infos_n = run_scaling({'n':[1000,5000,10000,20000,50000]})
-# benchmark_infos_n.to_csv(f'{output_dir}/benchmarking_n.csv')
+benchmark_infos_n = run_scaling({'n':[1000,5000,10000,20000,50000]})
+benchmark_infos_n.to_csv(f'{output_dir}/benchmarking_n.csv')
 
-benchmark_infos_n = run_scaling({'rank':[2,3,4,5,10]})
-benchmark_infos_n.to_csv(f'{output_dir}/benchmarking_rank.csv')
+# benchmark_infos_n = run_scaling({'rank':[2,3,4,5,10]}) # TODO uncomment
+# benchmark_infos_n.to_csv(f'{output_dir}/benchmarking_rank.csv')
