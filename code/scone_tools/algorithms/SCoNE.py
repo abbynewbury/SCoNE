@@ -643,7 +643,7 @@ def SCoNE_parallel(
     
     benchmark_info = {
         "wall_time": wall_time,
-        "peak_cpu_gb": peak_cpu / 1024**3 if (n_jobs == 1 and not use_gpu) else None,
+        "peak_cpu_gb": peak_cpu / 1e9 if (n_jobs == 1 and not use_gpu) else None,
     }
 
     # FOR: writing and calculating cophenetic correlation coefficient
