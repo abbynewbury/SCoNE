@@ -1,0 +1,2 @@
+{'n': 5000, 'M_C': 100, 'M_G': 100, 'rank': 3, 'noise': 0.5, 'gamma': 1, 'sparsity': 0, 'rG': 0, 'rGC': 0, 'rZ': 0, 'signed_cov_effects': False, 'subgroup_structure': True, 'overdispersion_nu': 0}
+running on CPU

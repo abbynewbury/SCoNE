@@ -11,8 +11,8 @@ from concurrent.futures import ProcessPoolExecutor
 workspace_dir='/home/jupyter/workspace/disease_subtyping'
 output_dir = f'{workspace_dir}/simulations_output'
 
-DEFAULT_SIM_KWARGS = {"n":500,"M_C":100,"M_G":100,"rank":3,"noise":0.5,"gamma": 1,"sparsity":0,"rG":0,
-                  "rGC":0,"rZ":0,"signed_cov_effects": False,"subgroup_structure": True, "overdispersion_nu":0} # TODO: put back at 5k
+DEFAULT_SIM_KWARGS = {"n":5000,"M_C":100,"M_G":100,"rank":3,"noise":0.5,"gamma": 1,"sparsity":0,"rG":0,
+                  "rGC":0,"rZ":0,"signed_cov_effects": False,"subgroup_structure": True, "overdispersion_nu":0} 
 
 def run_one_scaling(new_value_dict):
     sim_kwargs = DEFAULT_SIM_KWARGS | new_value_dict
@@ -86,22 +86,13 @@ def run_scaling(variable_ranges):
 
 if __name__ == "__main__":
 
-    # benchmark_infos = run_scaling({'M_G':[100,250,500,1000], 
-    #                                'M_C':[100,250,500,1000]})
-    # benchmark_infos.to_csv(f'{output_dir}/benchmarking_features.csv') 
-    
-    # benchmark_infos_n = run_scaling({'n':[1000,5000,10000,20000,50000]})
-    # benchmark_infos_n.to_csv(f'{output_dir}/benchmarking_n.csv')
-    
-    # benchmark_infos_rank = run_scaling({'rank':[2,3,4,5,10]}) 
-    # benchmark_infos_rank.to_csv(f'{output_dir}/benchmarking_rank.csv')
-
-    benchmark_infos = run_scaling({'M_G':[100, 10], 
-                                   'M_C':[100,10]})
+    benchmark_infos = run_scaling({'M_G':[100,250,500,1000], 
+                                   'M_C':[100,250,500,1000]})
     benchmark_infos.to_csv(f'{output_dir}/benchmarking_features.csv') 
     
-    benchmark_infos_n = run_scaling({'n':[100,500]})
+    benchmark_infos_n = run_scaling({'n':[1000,5000,10000,20000,50000]})
     benchmark_infos_n.to_csv(f'{output_dir}/benchmarking_n.csv')
     
-    benchmark_infos_rank = run_scaling({'rank':[5,2]}) 
+    benchmark_infos_rank = run_scaling({'rank':[2,3,4,5,10]}) 
     benchmark_infos_rank.to_csv(f'{output_dir}/benchmarking_rank.csv')
+
