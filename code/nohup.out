@@ -1,2 +1,50 @@
 {'n': 5000, 'M_C': 100, 'M_G': 100, 'rank': 3, 'noise': 0.5, 'gamma': 1, 'sparsity': 0, 'rG': 0, 'rGC': 0, 'rZ': 0, 'signed_cov_effects': False, 'subgroup_structure': True, 'overdispersion_nu': 0}
 running on CPU
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/opt/conda/envs/py311/lib/python3.11/multiprocessing/spawn.py", line 122, in spawn_main
+Traceback (most recent call last):
+  File "/home/jupyter/repos/SCoNE/code/run_benchmarking.py", line 83, in run_scaling
+    for result in ex.map(run_one_scaling, conditions):
+  File "/opt/conda/envs/py311/lib/python3.11/concurrent/futures/process.py", line 620, in _chain_from_iterable_of_lists
+    for element in iterable:
+  File "/opt/conda/envs/py311/lib/python3.11/concurrent/futures/_base.py", line 619, in result_iterator
+    exitcode = _main(fd, parent_sentinel)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/envs/py311/lib/python3.11/multiprocessing/spawn.py", line 135, in _main
+    return self._bootstrap(parent_sentinel)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/envs/py311/lib/python3.11/multiprocessing/process.py", line 332, in _bootstrap
+    yield _result_or_cancel(fs.pop())
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/envs/py311/lib/python3.11/concurrent/futures/_base.py", line 317, in _result_or_cancel
+    return fut.result(timeout)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/envs/py311/lib/python3.11/concurrent/futures/_base.py", line 451, in result
+    self._condition.wait(timeout)
+  File "/opt/conda/envs/py311/lib/python3.11/threading.py", line 327, in wait
+    threading._shutdown()
+  File "/opt/conda/envs/py311/lib/python3.11/threading.py", line 1590, in _shutdown
+    waiter.acquire()
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jupyter/repos/SCoNE/code/run_benchmarking.py", line 89, in <module>
+    benchmark_infos = run_scaling({'M_G':[100,250,500,1000], 
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jupyter/repos/SCoNE/code/run_benchmarking.py", line 78, in run_scaling
+    with ProcessPoolExecutor(
+  File "/opt/conda/envs/py311/lib/python3.11/concurrent/futures/_base.py", line 647, in __exit__
+    self.shutdown(wait=True)
+  File "/opt/conda/envs/py311/lib/python3.11/concurrent/futures/process.py", line 851, in shutdown
+    self._executor_manager_thread.join()
+  File "/opt/conda/envs/py311/lib/python3.11/threading.py", line 1119, in join
+    self._wait_for_tstate_lock()
+  File "/opt/conda/envs/py311/lib/python3.11/threading.py", line 1139, in _wait_for_tstate_lock
+    lock.acquire()
+KeyboardInterrupt
+    if lock.acquire(block, timeout):
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt

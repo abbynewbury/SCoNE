@@ -89,10 +89,11 @@ if __name__ == "__main__":
     benchmark_infos = run_scaling({'M_G':[100,250,500,1000], 
                                    'M_C':[100,250,500,1000]})
     benchmark_infos.to_csv(f'{output_dir}/benchmarking_features.csv') 
+
+    benchmark_infos_rank = run_scaling({'rank':[2,3,4,5,10]}) 
+    benchmark_infos_rank.to_csv(f'{output_dir}/benchmarking_rank.csv')
     
     benchmark_infos_n = run_scaling({'n':[1000,5000,10000,20000,50000]})
     benchmark_infos_n.to_csv(f'{output_dir}/benchmarking_n.csv')
     
-    benchmark_infos_rank = run_scaling({'rank':[2,3,4,5,10]}) 
-    benchmark_infos_rank.to_csv(f'{output_dir}/benchmarking_rank.csv')
 
