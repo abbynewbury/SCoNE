@@ -33,7 +33,7 @@ This code not meant to be run on RGWAS because the simulations are designed to e
 def _call_kwargs_run_eval(kw):
     return run_evaluation(**kw)  # expands kwargs dict
 
-def run_evaluation(run_name, sim, factor_matrices, loss_function):
+def run_evaluation(run_name, sim, factor_matrices, loss_function, lambda_Gloss):
     '''
     return dictionary with relevant results
     '''
@@ -65,7 +65,7 @@ def run_evaluation(run_name, sim, factor_matrices, loss_function):
     
     # get tuning metrics 
     if run_name !='MVBC':
-        G_loss = loss_function['G_loss'][-1]
+        G_loss = (1/lambda_Gloss)*loss_function['G_loss'][-1]
         C_loss = loss_function['C_loss'][-1]
         if run_name != 'HNMF(res)':
             results['rel_error_G'] = G_loss/reconstruction_evaluation.kl_rel_error_denom(sim["G"])
@@ -121,7 +121,7 @@ def _one_run(tune_arg: dict, sim_folder: str, split: str):
         with open(f'{ta["out_path"]}{suffix}_loss_function.json', "r") as f:
             loss_function = json.load(f)
     
-        results = run_evaluation(ta["run_name"], sim, factor_matrices, loss_function)
+        results = run_evaluation(ta["run_name"], sim, factor_matrices, loss_function, ta['lambda_Gloss'])
         results['run'] = run
         results['split'] = split
         results['sim_id'] = sim_id
@@ -244,7 +244,7 @@ def run_one(variable_ranges, output_dir, experiment_name):
         reg = {'lambda_W':row.lambda_option,'alpha':alpha,'lambda_H_G':row.lambda_option,'lambda_H_C':row.lambda_option}
         rank = row['rank'] if 'rank' in row.index else 3
         a = dict(job_id=row.job_id,run_name=row.run_name, out_path=row.out_path, G=G, C=C, Z=Z, reg_params=reg,sim_id=row.sim_id,
-            lambda_Gloss=C.sum()/G.sum(), 
+            lambda_Gloss=np.linalg.norm(C)**2/np.linalg.norm(G)**2 if row.run_name=='HNMF(res)' else C.sum()/G.sum(), 
             G_path=G_path, C_path=C_path, Z_path=Z_path, r_path='/opt/conda/envs/jupyter/bin/Rscript', rank=rank, num_init=50,
             write_all_init=True, write_all_init_path=row.out_path) 
         tuning_args.append(a)
@@ -252,7 +252,7 @@ def run_one(variable_ranges, output_dir, experiment_name):
                                 run_name=row.run_name,job_id=row.job_id,
                                 lambda_option=row.lambda_option, alpha=reg['alpha'], lambda_W=reg['lambda_W'],
                                 lambda_H_G=reg['lambda_H_G'],lambda_H_C=reg['lambda_H_C'], rank=rank, num_init=50, 
-                                    lambda_Gloss=C.sum()/G.sum()))
+                                    lambda_Gloss=np.linalg.norm(C)**2/np.linalg.norm(G)**2 if row.run_name=='HNMF(res)' else C.sum()/G.sum()))
     tune_record = pd.DataFrame(tuning_rows)
     
     # ---- run TUNE ----
@@ -287,7 +287,7 @@ def run_one(variable_ranges, output_dir, experiment_name):
         reg = {'lambda_W':row.lambda_option,'alpha':alpha,'lambda_H_G':row.lambda_option,'lambda_H_C':row.lambda_option}
         rank = row['rank'] if 'rank' in row.index else 3
         a = dict(job_id=row.job_id,run_name=row.run_name, out_path=row.out_path, G=G, C=C, Z=Z, reg_params=reg,sim_id=row.sim_id,
-            lambda_Gloss=C.sum()/G.sum(),
+            lambda_Gloss=np.linalg.norm(C)**2/np.linalg.norm(G)**2 if row.run_name=='HNMF(res)' else C.sum()/G.sum(),
             G_path=G_path, C_path=C_path, Z_path=Z_path, r_path='/opt/conda/envs/jupyter/bin/Rscript', rank=rank, num_init=50, 
             write_all_init=True, write_all_init_path=row.out_path) 
         training_args.append(a)
@@ -295,7 +295,7 @@ def run_one(variable_ranges, output_dir, experiment_name):
                                 run_name=row.run_name,job_id=row.job_id,
                                 lambda_option=row.lambda_option, alpha=reg['alpha'], lambda_W=reg['lambda_W'],
                                 lambda_H_G=reg['lambda_H_G'],lambda_H_C=reg['lambda_H_C'], rank=rank, num_init=50,
-                                    lambda_Gloss=C.sum()/G.sum()))
+                                    lambda_Gloss=np.linalg.norm(C)**2/np.linalg.norm(G)**2 if row.run_name=='HNMF(res)' else C.sum()/G.sum()))
     train_record = pd.DataFrame(training_rows)
     # ---- run TRAIN ----
     with ProcessPoolExecutor(max_workers=16) as ex:
@@ -318,7 +318,6 @@ def run_one(variable_ranges, output_dir, experiment_name):
 
 
 if __name__ == "__main__": 
-    run_evaluation_only=False
     output_dir = f'{workspace_dir}/simulations_output'
 
     # ASSESS RUNS OVER rZ, unobs conf. and gamma
