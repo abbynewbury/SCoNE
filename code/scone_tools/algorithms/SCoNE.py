@@ -74,7 +74,7 @@ def total_loss(G, C, Z, W, H_G, H_C, U_G, U_C, alpha, lambda_H_G, lambda_H_C, la
         C_loss = compute_loss(C,C_hat,loss_type=C_loss_type,xp=xp)
     else: C_loss = 0
 
-    l2_regularization = alpha*l2_norm_squared(W,xp=xp)
+    l2_regularization = (alpha/2)*l2_norm_squared(W,xp=xp)
     l1_regularization = lambda_H_G*l1_norm(H_G,xp=xp) +  lambda_H_C*l1_norm(H_C,xp=xp) # l1 reg.
 
     if G_loss < 0: assert True == False, f"G_loss with loss type {G_loss_type} negative"
