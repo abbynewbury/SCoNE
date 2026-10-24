@@ -15,9 +15,9 @@ import scone_tools.algorithms.RGWASWrapper as RGWASWrapper
 
 def deploy_train_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambda_Gloss=None,
                     G_path='',C_path='',Z_path='',r_path='',rank=3, num_init=1, n_jobs=1,
-                    write_all_init=False, write_all_init_path='', use_gpu=False):
+                    write_all_init=False, write_all_init_path='', use_gpu=False, G_loss_type='kl_div',C_loss_type='kl_div'):
 
-    if run_name in ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','HNMF(res)','CoNE','SCoNE','SCoNE(Fro)']:
+    if run_name in ['G-NMF','C-NMF','G-CoNE','C-CoNE','HNMF','HNMF(res)','CoNE','SCoNE','SCoNE(KL)']:
         if 'SCoNE' not in run_name:
             reg_params = {'alpha':0,'lambda_H_G':0, 'lambda_H_C':0}
         if run_name=='HNMF(res)':
@@ -26,23 +26,23 @@ def deploy_train_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lamb
         
         # set G and C loss types
         if 'G-' in run_name: 
-            G_loss_type,C_loss_type=('kl_div',None)
+            G_loss_type,C_loss_type=(G_loss_type,None)
             C=None
             if 'NMF' in run_name:
                 Z=None
         elif 'C-' in run_name: 
-            G_loss_type,C_loss_type=(None,'kl_div')
+            G_loss_type,C_loss_type=(None,C_loss_type)
             G=None
             if 'NMF' in run_name:
                 Z=None
-        elif run_name=='SCoNE(Fro)': G_loss_type,C_loss_type=('fro','fro')
+        elif run_name=='SCoNE(KL)': G_loss_type,C_loss_type=('kl_div','kl_div')
         elif run_name=='HNMF':
-            G_loss_type,C_loss_type=('kl_div','kl_div')
+            G_loss_type,C_loss_type=(G_loss_type,C_loss_type)
             Z=None
         elif run_name=='HNMF(res)':
             G_loss_type,C_loss_type=('fro','fro')
             Z=None           
-        else: G_loss_type,C_loss_type=('kl_div','kl_div')
+        else: G_loss_type,C_loss_type=(G_loss_type,C_loss_type)
 
 
         
@@ -76,7 +76,7 @@ def deploy_train_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lamb
 
 def deploy_test_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambda_Gloss=None,
                     H_G=None,H_C=None,U_G=None,U_C=None,rank=3,num_init=1,n_jobs=1,C_train=None,G_train=None,Z_train=None,
-                    write_all_init=False, write_all_init_path='', use_gpu=False):
+                    write_all_init=False, write_all_init_path='', use_gpu=False, G_loss_type='kl_div',C_loss_type='kl_div'):
 
     if 'SCoNE' not in run_name:
         reg_params = {'alpha':0,'lambda_H_G':0, 'lambda_H_C':0}
@@ -86,22 +86,22 @@ def deploy_test_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambd
         
     # set G and C loss types and test params
     if 'G-' in run_name: 
-        G_loss_type,C_loss_type=('kl_div',None)
+        G_loss_type,C_loss_type=(G_loss_type,None)
         C=None
         H_C=None
         U_C=None
         if 'NMF' in run_name:
             Z=None
     elif 'C-' in run_name: 
-        G_loss_type,C_loss_type=(None,'kl_div')
+        G_loss_type,C_loss_type=(None,C_loss_type)
         G=None
         H_G=None
         U_G=None
         if 'NMF' in run_name:
             Z=None
-    elif run_name=='SCoNE(Fro)': G_loss_type,C_loss_type=('fro','fro')
+    elif run_name=='SCoNE(KL)': G_loss_type,C_loss_type=('kl_div','kl_div')
     elif run_name=='HNMF':
-        G_loss_type,C_loss_type=('kl_div','kl_div')
+        G_loss_type,C_loss_type=(G_loss_type,C_loss_type)
         Z=None
         U_G=None
         U_C=None
@@ -110,7 +110,7 @@ def deploy_test_run(run_name,out_path,G=None,C=None,Z=None,reg_params=None,lambd
         Z=None           
         U_G=None
         U_C=None        
-    else: G_loss_type,C_loss_type=('kl_div','kl_div')
+    else: G_loss_type,C_loss_type=(G_loss_type,C_loss_type)
 
 
     algorithm_func_kwargs={"G":G, "C":C, "Z":Z,"rank":rank, "num_init":num_init, "init":"random", "n_jobs":n_jobs,

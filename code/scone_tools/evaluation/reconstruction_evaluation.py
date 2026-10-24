@@ -14,12 +14,20 @@ def frobenius_cosine_similarity(A, B):
 def kl_rel_error_denom(V):
     """
     Denominator used in Hsieh & Dhillon (KDD 2011):
-    I-divergence between V and row-mean baseline Vbar,
-    where each row i has constant value equal to its row mean.
+    I-divergence between V and col-mean baseline Vbar (in their paper row-mean since transposed),
+    where each column i has constant value equal to its col mean.
     """
     V_safe = V + 1e-12
-    row_means = V.mean(axis=1, keepdims=True) + 1e-12
-    return np.sum(V_safe * np.log(V_safe / row_means))
+    col_means = V.mean(axis=0, keepdims=True) + 1e-12
+    return np.sum(V_safe * np.log(V_safe / col_means))
+
+def fro_rel_error_denom(V):
+    """
+    Frobenius baseline for patients as rows and features as columns.
+    Each column is reconstructed using its mean across patients.
+    """
+    col_means = V.mean(axis=0, keepdims=True)
+    return 0.5 * np.sum((V - col_means)**2)
 
 def best_permutation_similarity(W_true, W_hat):
     # Compute pairwise column inner products (the numerator terms)
