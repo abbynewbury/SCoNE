@@ -263,13 +263,16 @@ def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, l1=
         s = x_new - x
         return x_new, s
 
+    def objective(x):
+        return fun(x) + l1 * l1_norm(x, xp=xp)
+
     # Armijo backtracking
     for it in range(max_iter):
-        f= fun(x)
+        f= objective(x)
         g = grad(x)
 
         x_new, s = x_and_s(n, x, g)
-        f_new = fun(x_new)
+        f_new = objective(x_new)
 
         if f_new - f <= sigma * xp.vdot(g, s):
             # grow n: n <- n / rho until Armijo fails or projection makes no change
@@ -278,7 +281,7 @@ def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, l1=
                 x_next, s_next = x_and_s(n_next, x, g)
                 if xp.allclose(x_next, x_new):
                     break
-                f_next = fun(x_next)
+                f_next = objective(x_next)
                 if not (f_next - f <= sigma * xp.vdot(g, s_next)):
                     break
                 n, x_new, s, f_new = n_next, x_next, s_next, f_next
@@ -286,7 +289,7 @@ def pgd_armijo(fun, grad, x0, max_iter=500, rho=0.1, sigma=1e-4, ftol=1e-12, l1=
             for _ in range(max_ls):
                 n_next= n * rho
                 x_next, s_next = x_and_s(n_next, x, g)
-                f_next = fun(x_next)
+                f_next = objective(x_next)
                 if f_next - f <= sigma * xp.vdot(g, s_next):
                     n, x_new, s, f_new = n_next, x_next, s_next, f_next
                     break
