@@ -16,7 +16,7 @@ read_matrix <- function(path) {
 
 
 
-run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, maxOuter) {
+run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C) {
   lvs <- c(lambda_H_G, lambda_H_C)
   lz  <- lambda_W
 
@@ -38,7 +38,7 @@ run_mvbc <- function(G_path, C_path, rank, lambda_W, lambda_H_G, lambda_H_C, max
     C_i <- C[remaining, , drop = FALSE]
 
     datasets <- list(G_i, C_i)
-    result <- mvsvdl1(datasets, lvs, lz,maxOuter=maxOuter)
+    result <- mvsvdl1(datasets, lvs, lz)
     # store W
     cl <- as.vector(result$Cluster)
     cl_full <- rep(0, nrow(G))  # fill with 0s by default
